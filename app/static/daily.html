@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>311 日常练习</title>
+<style>
+  :root { --line:#e3e3e3; --ink:#222; --muted:#777; --accent:#2b6cb0; --ok:#2f855a; --bad:#c53030; --bg:#fafafa; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+         color:var(--ink); background:var(--bg); line-height:1.75; }
+  header { position:sticky; top:0; z-index:9; background:#fff; border-bottom:1px solid var(--line);
+           padding:10px 18px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; font-weight:600; }
+  .steps { display:flex; gap:6px; font-size:13px; }
+  .steps span { padding:2px 10px; border-radius:12px; background:#eef1f4; color:var(--muted); }
+  .steps span.on { background:var(--accent); color:#fff; }
+  main { max-width:900px; margin:0 auto; padding:18px; }
+  section { background:#fff; border:1px solid var(--line); border-radius:8px; padding:18px 20px; margin-bottom:16px; }
+  section[hidden] { display:none; }
+  h2 { font-size:15px; margin:0 0 12px; padding-bottom:8px; border-bottom:1px solid var(--line); }
+  textarea { width:100%; min-height:120px; padding:10px; font-size:14px; font-family:inherit;
+             border:1px solid var(--line); border-radius:6px; resize:vertical; }
+  button { font-size:14px; padding:8px 18px; border-radius:6px; border:1px solid var(--accent);
+           background:var(--accent); color:#fff; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  button.ghost { background:#fff; color:var(--accent); }
+  button.mini { font-size:12px; padding:4px 10px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+  .muted { color:var(--muted); font-size:13px; }
+  .tag { display:inline-block; font-size:12px; padding:1px 7px; border-radius:10px;
+         background:#eef3f8; color:var(--accent); margin-left:6px; }
+  .tag.ai { background:#fdf3e7; color:#b7791f; }
+  .tag.real { background:#e8f5ec; color:var(--ok); }
+  .q { padding:14px 0; border-bottom:1px dashed var(--line); }
+  .q:last-child { border-bottom:none; }
+  .stem { margin-bottom:8px; white-space:pre-wrap; }
+  .no { display:inline-block; min-width:30px; font-weight:700; color:var(--accent); }
+  label.opt { display:block; padding:5px 0 5px 30px; cursor:pointer; border-radius:4px; }
+  label.opt:hover { background:#f2f6fa; }
+  .pts { margin-top:10px; padding:10px 12px; background:#fbfbfb; border:1px dashed var(--line); border-radius:6px; }
+  .pt { padding:3px 0; font-size:14px; }
+  .pt .ev { color:var(--muted); font-size:12px; }
+  .card { border:1px solid var(--line); border-radius:6px; padding:10px 12px; margin:8px 0; }
+  .card h4 { margin:0 0 6px; font-size:14px; }
+  .score { font-size:20px; font-weight:700; }
+  .grade { background:#f7fafc; border:1px solid var(--line); border-radius:6px;
+           padding:12px; margin-top:10px; white-space:pre-wrap; font-size:14px; }
+  .per para, .per p { margin:6px 0; }
+  .kp { font-size:13px; color:var(--muted); }
+  .extra { background:#fffbea; border-left:3px solid #ecc94b; padding:6px 10px; margin:6px 0; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>311 日常练习</h1>
+  <div class="steps">
+    <span id="st1" class="on">① 输入记录</span>
+    <span id="st2">② 确认考点</span>
+    <span id="st3">③ 答题</span>
+    <span id="st4">④ 结果</span>
+  </div>
+  <div style="flex:1"></div>
+  <span class="muted" id="usage"></span>
+  <a href="/" class="muted" style="text-decoration:none">← 模拟考试</a>
+  <a href="/logs" class="muted" style="text-decoration:none">练习日志</a>
+</header>
+
+<main>
+  <!-- 步骤 1 -->
+  <section id="s1">
+    <h2>今天学了什么？</h2>
+    <p class="muted">用你自己的话写就行，比如「背诵外国教育史第四章 近代国家教育体制；夸美纽斯、卢梭、裴斯泰洛齐。做题：中国教育史第五章 理学教育思想」。</p>
+    <textarea id="log" placeholder="今天背诵了…&#10;做了…的题"></textarea>
+    <div class="row">
+      <button id="btnParse" onclick="doParse()">解析并定位考点</button>
+      <button class="ghost" onclick="doWeakPaper()">按我的薄弱点出题（不用填记录）</button>
+      <span class="muted" id="msg1"></span>
+    </div>
+    <div id="focusBox"></div>
+  </section>
+
+  <!-- 步骤 2 -->
+  <section id="s2" hidden>
+    <h2>确认考点<span class="muted" style="font-weight:400;font-size:13px">（取消勾选不相关的，AI 偶尔会多识别）</span></h2>
+    <div id="matches"></div>
+    <div id="unmatchedBox"></div>
+    <div class="row">
+      <button onclick="doGenerate()" id="btnGen">按这些考点出题（20 客观 + 3 主观）</button>
+      <button class="ghost" onclick="goStep(1)">返回修改记录</button>
+      <span class="muted" id="msg2"></span>
+    </div>
+  </section>
+
+  <!-- 步骤 3 -->
+  <section id="s3" hidden>
+    <h2>答题 <span class="muted" id="paperInfo" style="font-weight:400;font-size:13px"></span></h2>
+    <div id="paper"></div>
+    <div class="row">
+      <button onclick="submitAll()" id="btnSubmit">提交并保存</button>
+      <button class="ghost" onclick="doGenerate()">再练一组</button>
+      <span class="muted" id="msg3"></span>
+    </div>
+  </section>
+
+  <!-- 步骤 4 -->
+  <section id="s4" hidden>
+    <h2>结果</h2>
+    <div id="result"></div>
+    <div class="row">
+      <button class="ghost" onclick="loadWeakness()">看薄弱点</button>
+      <button class="ghost" onclick="location.reload()">回到开始</button>
+    </div>
+    <div id="weak"></div>
+  </section>
+</main>
+
+<script>
+let MATCHES = [], PAPER = null, SUBJECTIVE_IDS = [];
+
+const $ = id => document.getElementById(id);
+
+function goStep(n) {
+  for (let i = 1; i <= 4; i++) {
+    $('s' + i).hidden = (i !== n);
+    $('st' + i).classList.toggle('on', i <= n && i === n);
+  }
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+async function post(path, body) {
+  const r = await fetch(path, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  return await r.json();
+}
+
+function showUsage(u, where) {
+  if (!u) return;
+  const est = (u.prompt_tokens||0)/1e6*1 + (u.completion_tokens||0)/1e6*4;
+  $(where).textContent = `tokens ${u.prompt_tokens||0}/${u.completion_tokens||0} ≈ ${est.toFixed(4)} 元`;
+}
+
+// ---------- 按薄弱点出题（不需要输入学习记录）
+async function doWeakPaper() {
+  $('msg1').textContent = '按薄弱点组卷中…（真题优先，不足用 AI 补，可能 30-60 秒）';
+  try {
+    const r = await post('/api/daily/weak-paper', {});
+    if (!r.ok) { $('msg1').textContent = r.error || '失败'; return; }
+    PAPER = r.paper;
+    renderPaper(r);
+    showUsage(r.usage, 'usage');
+    const f = r.focus || [];
+    $('focusBox').innerHTML = f.length ? `
+      <div class="card" style="background:#fffbea;border-left:3px solid #ecc94b">
+        <h4>本次聚焦的薄弱考点（命中率最低的 ${f.length} 个）</h4>
+        ${f.map(x => `<div class="kp">${Math.round(x.rate*100)}%（${x.hit}/${x.total}） ${x.path}</div>`).join('')}
+      </div>` : '';
+    $('msg1').textContent = '';
+    goStep(3);
+  } catch (e) {
+    $('msg1').textContent = '出错: ' + e;
+  }
+}
+
+// ---------- 步骤 1
+async function doParse() {
+  const text = $('log').value.trim();
+  if (!text) { $('msg1').textContent = '请先写点什么'; return; }
+  $('btnParse').disabled = true;
+  $('msg1').textContent = 'AI 解析中…';
+  try {
+    const r = await post('/api/daily/parse', { text });
+    if (!r.ok) { $('msg1').textContent = '失败: ' + r.error; return; }
+    MATCHES = r.matches || [];
+    renderMatches(r);
+    showUsage(r.usage, 'usage');
+    $('msg1').textContent = '';
+    goStep(2);
+  } catch (e) {
+    $('msg1').textContent = '出错: ' + e;
+  } finally {
+    $('btnParse').disabled = false;
+  }
+}
+
+function renderMatches(r) {
+  $('matches').innerHTML = MATCHES.map((m, i) => `
+    <label class="card" style="display:block;cursor:pointer">
+      <input type="checkbox" class="mk" data-i="${i}" checked>
+      <b>${m.name}</b>
+      <span class="tag">置信 ${(m.confidence ?? 0).toFixed(2)}</span>
+      <div class="kp">${m.path || ''}</div>
+      <div class="kp">依据：${m.reason || ''}</div>
+    </label>`).join('') || '<p class="muted">没有识别到考点，请改写记录。</p>';
+  const um = r.unmatched || [];
+  $('unmatchedBox').innerHTML = um.length
+    ? `<p class="muted">未能定位的内容：${um.join('；')}</p>` : '';
+}
+
+// ---------- 步骤 2 → 3
+async function doGenerate() {
+  const ids = [...document.querySelectorAll('.mk:checked')].map(c => MATCHES[+c.dataset.i].id);
+  if (!ids.length) { $('msg2').textContent = '至少勾选一个考点'; return; }
+  $('btnGen').disabled = true;
+  $('msg2').textContent = '出题中（真题优先，不足用 AI 补）… 可能要 30-60 秒';
+  try {
+    const r = await post('/api/daily/generate', { point_ids: ids });
+    if (!r.ok) { $('msg2').textContent = '失败: ' + r.error; return; }
+    PAPER = r.paper;
+    renderPaper(r);
+    showUsage(r.usage, 'usage');
+    $('msg2').textContent = '';
+    goStep(3);
+  } catch (e) {
+    $('msg2').textContent = '出错: ' + e;
+  } finally {
+    $('btnGen').disabled = false;
+  }
+}
+
+function normSingle(q, srcTag) {
+  const opts = typeof q.options === 'string' ? JSON.parse(q.options || '{}') : (q.options || {});
+  return { id:q.id, stem:q.stem, options:opts, tag:srcTag,
+           number:q.number || '', outline:q.outline_id };
+}
+function normSubj(q, srcTag) {
+  return { id:q.id, qtype:q.qtype, stem:q.stem, tag:srcTag,
+           full_score:(q.extra && JSON.parse(q.extra||'{}').full_score) || q.full_score || 15,
+           points:q.points || [], outline:q.outline_id };
+}
+
+function renderPaper(r) {
+  const real = r.paper.real, gen = r.paper.generated || {single:[],subjective:[]};
+  const singles = [...(real.single||[]).map(q => normSingle(q,'真题')),
+                   ...((gen.single)||[]).map(q => normSingle(q,'AI生成'))];
+  const subs = [...(real.subjective||[]).map(q => normSubj(q,'真题')),
+                ...((gen.subjective)||[]).map(q => normSubj(q,'AI生成'))];
+  SUBJECTIVE_IDS = subs.map(s => s.id);
+
+  $('paperInfo').textContent =
+    `客观 ${singles.length} 道 ｜ 主观 ${subs.length} 道 ｜ 其中真题 ${r.real_count} 道，AI 生成 ${r.generated_count} 道`;
+
+  const typeName = {analysis:'辨析', short:'简答', essay:'分析论述'};
+  $('paper').innerHTML = `
+    <h3 style="font-size:14px;margin:6px 0 10px">一、单项选择题</h3>
+    ${singles.map((q,i) => `
+      <div class="q">
+        <div class="stem"><span class="no">${i+1}.</span>${q.stem}
+          <span class="tag ${q.tag==='真题'?'real':'ai'}">${q.tag}</span></div>
+        ${Object.entries(q.options).map(([k,v]) =>
+          `<label class="opt"><input type="radio" name="sq${q.id}" value="${k}"><b>${k}.</b> ${v}</label>`).join('')}
+      </div>`).join('') || '<p class="muted">（本次没有客观题）</p>'}
+
+    <h3 style="font-size:14px;margin:22px 0 10px">二、主观题（在纸上作答）</h3>
+    ${subs.map((q,i) => `
+      <div class="q" id="sub-${q.id}">
+        <div class="stem"><span class="no">${i+1}.</span>${q.stem}
+          <span class="tag">${typeName[q.qtype]||q.qtype} · ${q.full_score}分</span>
+          <span class="tag ${q.tag==='真题'?'real':'ai'}">${q.tag}</span></div>
+        <div class="row" style="margin:6px 0">
+          <button class="ghost mini" onclick="togglePts(${q.id}, this)">展开/收起采分点自评</button>
+          <button class="ghost mini" onclick="aiGrade(${q.id})">AI 批改（用下方文本）</button>
+          <button class="ghost mini" onclick="document.getElementById('file-${q.id}').click()">上传手写照片批改</button>
+          <input type="file" id="file-${q.id}" accept="image/*" hidden onchange="onPick(${q.id}, this)">
+        </div>
+        <div class="pts" id="pts-${q.id}" hidden>
+          <div class="muted" style="margin-bottom:6px">勾选你实际答到的采分点：</div>
+          ${(q.points||[]).map(p => `
+            <label class="pt"><input type="checkbox" data-q="${q.id}" value="${p.seq}">
+              <b>${p.seq}.</b> ${p.claim}
+              <span class="ev">｜${(p.evidence||'').slice(0,70)}</span></label>`).join('')}
+        </div>
+        <textarea id="ans-${q.id}" placeholder="（可选）把你的作答文本敲进来，或把照片交给 AI 批改。用 AI 批改时必须填这里。" style="min-height:70px;margin-top:8px"></textarea>
+        <div class="grade" id="grade-${q.id}" hidden></div>
+      </div>`).join('') || '<p class="muted">（本次没有主观题）</p>'}`;
+}
+
+function togglePts(id, btn) {
+  const box = $('pts-' + id);
+  box.hidden = !box.hidden;
+  btn.textContent = box.hidden ? '展开/收起采分点自评' : '收起采分点';
+}
+
+// ---------- 手写照片：压缩后交多模态批改
+function compressImage(file, maxW = 1600, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxW / img.width);
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(img.width * scale);
+      cv.height = Math.round(img.height * scale);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      resolve(cv.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+async function onPick(qid, input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  const box = $('grade-' + qid);
+  box.hidden = false;
+  box.textContent = '压缩图片…';
+  try {
+    const dataUrl = await compressImage(f);
+    box.textContent = `图片 ${Math.round(dataUrl.length/1024)} KB，AI 识别并批改中（约 15–30 秒）…`;
+    await aiGrade(qid, dataUrl);
+  } catch (e) {
+    box.textContent = '图片处理失败: ' + e;
+  } finally {
+    input.value = '';
+  }
+}
+
+// ---------- AI 批改单题（文本或图片）
+async function aiGrade(qid, imageData) {
+  const box = $('grade-' + qid);
+  const text = ($('ans-' + qid).value || '').trim();
+  if (!imageData && !text) {
+    box.hidden = false;
+    box.textContent = '请先把答案文本填入下面的框，或点「📷 上传手写照片批改」。';
+    return;
+  }
+  box.hidden = false;
+  box.textContent = imageData ? 'AI 识别并批改中（约 15–30 秒）…' : 'AI 批改中（思考模式，约 10–20 秒）…';
+  try {
+    const body = { question_id: qid };
+    if (imageData) body.image = imageData; else body.student_text = text;
+    const r = await post('/api/daily/grade', body);
+    if (!r.ok) { box.textContent = '失败: ' + r.error; return; }
+    const d = r.result;
+    showUsage(r.usage, 'usage');
+    box.innerHTML = `
+      ${d.recognized ? `<details open><summary>我识别到的手写内容（如有误请指出）</summary>
+        <div class="card">${d.recognized}${d.recognize_note ? `<div class="kp">识别存疑：${d.recognize_note}</div>` : ''}</div></details>` : ''}
+      <div class="score">${d.score} / ${d.full_score}</div>
+      <p><b>一句话总评：</b>${d.one_line || ''}</p>
+      <p><b>命中采分点：</b>${(d.hit_seqs||[]).join('、') || '无'} ｜
+         <b>漏掉：</b>${(d.miss_seqs||[]).join('、') || '无'} ｜
+         <b>错因：</b>${d.cause || '—'}</p>
+      ${(d.extra_credit||[]).map(x => `<div class="extra">言之有理加分项：${x.text}（建议 ${x.suggest_score} 分）</div>`).join('')}
+      <details><summary>逐段批注</summary>
+        ${(d.per_paragraph||[]).map(p => `<div class="card"><div>${p.text}</div>
+           <div class="kp">${p.mark} ${p.comment||''}</div></div>`).join('')}
+      </details>
+      <details><summary>标准采分点</summary>
+        ${(d.standard_points||[]).map(p => `<div class="kp">${p.seq}. ${p.claim}（${p.score}分）</div>`).join('')}
+      </details>
+      <details><summary>优化版作答</summary><div>${d.optimized||''}</div></details>`;
+    (d.hit_seqs||[]).forEach(seq => {
+      const cb = document.querySelector(`#pts-${qid} input[value="${seq}"]`);
+      if (cb) cb.checked = true;
+    });
+    $('pts-' + qid).hidden = false;
+  } catch (e) {
+    box.textContent = '出错: ' + e;
+  }
+}
+
+// ---------- 提交
+async function submitAll() {
+  const single = [];
+  document.querySelectorAll('#paper input[type=radio]:checked').forEach(i => {
+    single.push({ id: parseInt(i.name.slice(2)), answer: i.value });
+  });
+  const map = {};
+  document.querySelectorAll('#paper .pt input:checked').forEach(i => {
+    const q = parseInt(i.dataset.q);
+    (map[q] = map[q] || []).push(parseInt(i.value));
+  });
+  const subjective = Object.entries(map).map(([id, hits]) => ({ id: parseInt(id), hits }));
+
+  $('btnSubmit').disabled = true;
+  $('msg3').textContent = '保存中…';
+  try {
+    const r = await post('/api/save', {
+      single, subjective, date: new Date().toISOString().slice(0,10),
+      mode: '日常练习',
+      note: `考点 ${MATCHES.filter((_,i)=>document.querySelector('.mk[data-i="'+i+'"]')?.checked).length} 个`
+    });
+    if (!r.ok) { $('msg3').textContent = '失败'; return; }
+    const s = r.saved;
+    $('result').innerHTML = `
+      <p class="score">客观题：${s.single_score} / ${s.single * 2} 分
+        <span class="muted" style="font-size:13px;font-weight:400">（答对 ${s.single_right}/${s.single}）</span></p>
+      <p class="muted">主观自评 ${s.subjective} 题 ｜ 记录采分点命中 ${s.point_hits} 个 ｜ 日期 ${r.date}</p>
+      <p class="muted">主观题若已用 AI 批改，结果不入命中率统计（避免 AI 情绪分污染薄弱点）。</p>`;
+    $('msg3').textContent = '';
+    goStep(4);
+  } catch (e) {
+    $('msg3').textContent = '出错: ' + e;
+  } finally {
+    $('btnSubmit').disabled = false;
+  }
+}
+
+async function loadWeakness() {
+  const r = await fetch('/api/weakness');
+  const j = await r.json();
+  const box = $('weak');
+  if (!j.items || !j.items.length) {
+    box.innerHTML = '<p class="muted">还没有数据——先做一组练习并提交。</p>';
+  } else {
+    const s = j.summary || {};
+    box.innerHTML = `<h3 style="font-size:14px;margin:16px 0 8px">薄弱考点（命中率升序）</h3>
+      <p class="muted">共 ${s.nodes||0} 个考点有数据，命中率低于 60% 的 ${s.weak_nodes||0} 个</p>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <tr><th style="text-align:left">考点</th><th>命中/总</th><th>命中率</th></tr>
+      ${j.items.map(i => `<tr><td style="border-bottom:1px solid #eee;padding:4px 6px" title="${i.path}">${i.name}</td>
+        <td style="text-align:center">${i.hit_n}/${i.total_n}</td>
+        <td style="text-align:center;${i.rate<0.6?'color:#c53030;font-weight:700':''}">${(i.rate*100).toFixed(0)}%</td></tr>`).join('')}
+      </table>`;
+  }
+  box.style.display = 'block';
+  box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+</script>
+</body>
+</html>

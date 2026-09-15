@@ -1,0 +1,34 @@
+{
+  "_说明": "复制本文件为 config.json 并填入你自己的 API key。config.json 已被 .gitignore 忽略，不会上传。",
+
+  "api": {
+    "provider": "deepseek",
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-flash",
+    "api_key": "在这里填入你的-key",
+    "timeout_seconds": 180,
+    "temperature": 0.3,
+    "thinking": "disabled",
+    "_thinking_说明": "disabled=快且便宜。实测同一问题：开启思考输出 44 tokens，关闭只需 1 token，而思考按输出计费。批改主观题时代码内会单独开启。"
+  },
+
+  "exam": {
+    "minutes": 180,
+    "single_score": 2,
+    "_说明": "311 真实结构：单选 45×2 + 辨析 3×15 + 简答 5×15 + 分析论述 3×30，另有 30 分必选题"
+  },
+
+  "daily": {
+    "objective_count": 20,
+    "subjective_count": 3,
+    "subjective_mix": ["short", "analysis", "essay"],
+    "prefer_real_questions": true,
+    "_prefer_说明": "true = 优先从真题库抽取，不够再调 AI 生成新题"
+  },
+
+  "paths": {
+    "database": "data/kaoyan.db",
+    "outline": "source/骨架.md",
+    "grading_prompt": "docs/311主观题批改提示词.md"
+  }
+}

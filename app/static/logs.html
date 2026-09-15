@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>311 练习日志</title>
+<style>
+  :root { --line:#e3e3e3; --ink:#222; --muted:#777; --accent:#2b6cb0; --bad:#c53030; --ok:#2f855a; --bg:#fafafa; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+         color:var(--ink); background:var(--bg); line-height:1.7; }
+  header { position:sticky; top:0; z-index:9; background:#fff; border-bottom:1px solid var(--line);
+           padding:10px 18px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; font-weight:600; }
+  header a { color:var(--accent); text-decoration:none; font-size:13px; }
+  main { max-width:900px; margin:0 auto; padding:18px; }
+  .sum { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 18px; margin-bottom:16px; }
+  .sum b { font-size:20px; }
+  .item { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 18px; margin-bottom:12px; }
+  .item h3 { margin:0 0 6px; font-size:15px; }
+  .item .tags { font-size:13px; color:var(--muted); margin-bottom:8px; }
+  .tag { display:inline-block; font-size:12px; padding:1px 8px; border-radius:10px;
+         background:#eef3f8; color:var(--accent); margin-right:6px; }
+  .tag.sim { background:#fdf3e7; color:#b7791f; }
+  .score { font-size:18px; font-weight:700; color:var(--accent); }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin-top:6px; }
+  td, th { border-bottom:1px solid #f0f0f0; padding:3px 6px; text-align:left; }
+  .rate-bad { color:var(--bad); font-weight:700; }
+  details summary { cursor:pointer; font-size:13px; color:var(--accent); }
+  .empty { color:var(--muted); text-align:center; padding:40px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>311 练习日志</h1>
+  <a href="/">← 模拟考试</a>
+  <a href="/daily">← 日常练习</a>
+  <div style="flex:1"></div>
+  <span class="muted" id="meta" style="font-size:13px;color:#777"></span>
+</header>
+<main>
+  <div class="sum" id="sum"></div>
+  <div id="list"></div>
+</main>
+<script>
+async function boot() {
+  const r = await fetch('/api/logs?limit=100');
+  const j = await r.json();
+  const items = j.items || [];
+  if (!items.length) {
+    document.getElementById('sum').style.display = 'none';
+    document.getElementById('list').innerHTML =
+      '<div class="empty">还没有记录。<br>去做一次模拟或日常练习，提交后这里就会出现。</div>';
+    return;
+  }
+  const totalQ = items.reduce((a, x) => a + (x.objective_total || 0), 0);
+  const totalR = items.reduce((a, x) => a + (x.objective_right || 0), 0);
+  const totalScore = items.reduce((a, x) => a + (x.objective_score || 0), 0);
+  document.getElementById('meta').textContent = `共 ${items.length} 次记录`;
+  document.getElementById('sum').innerHTML =
+    `<div>练习次数 <b>${items.length}</b> ｜ 累计客观题 <b>${totalQ}</b> 道 ｜
+      答对 <b>${totalR}</b> 道（${totalQ ? Math.round(totalR/totalQ*100) : 0}%）｜
+      累计得分 <b>${totalScore}</b> / ${totalQ * 2}</div>`;
+
+  document.getElementById('list').innerHTML = items.map((it, idx) => {
+    const snap = it.weak_snapshot || [];
+    const pct = it.objective_total ? Math.round(it.objective_right / it.objective_total * 100) : 0;
+    return `
+    <div class="item">
+      <h3>#${items.length - idx} ${it.date}
+        <span class="tag ${it.mode && it.mode.includes('模拟') ? 'sim' : ''}">${it.mode || '未标注'}</span></h3>
+      <div class="tags">
+        客观题 <span class="score">${it.objective_score ?? 0}</span> / ${(it.objective_total || 0) * 2} 分
+        （对 ${it.objective_right || 0}/${it.objective_total || 0}，${pct}%）
+        ｜ 主观自评 ${it.subjective_count || 0} 题
+        ｜ 采分点命中 ${it.point_hits || 0}/${it.point_total || 0}
+        ${it.note ? '｜ ' + it.note : ''}
+      </div>
+      ${snap.length ? `
+      <details>
+        <summary>当时的薄弱点快照（前 ${snap.length} 个）</summary>
+        <table>
+          <tr><th>考点</th><th>命中/总</th><th>命中率</th></tr>
+          ${snap.map(x => `<tr><td title="${x.path}">${x.name}</td>
+            <td>${x.hit}/${x.total}</td>
+            <td class="${x.rate < 0.6 ? 'rate-bad' : ''}">${Math.round(x.rate * 100)}%</td></tr>`).join('')}
+        </table>
+      </details>` : ''}
+    </div>`;
+  }).join('');
+}
+boot();
+</script>
+</body>
+</html>

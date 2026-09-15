@@ -1,0 +1,41 @@
+# ===== 敏感信息（绝对不要上传）=====
+config.json
+*.key
+.env
+
+# ===== 个人数据 =====
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.bak*
+source/学习记录.md
+source/_shots/
+source/pages/
+source/pages_*/
+
+# ===== 版权资料（真题/教辅 PDF，请勿分发）=====
+*.pdf
+01-311教育学真题*/
+02-311教育学解析*/
+311核心框架/
+311知识清单/
+311考试题库/
+source/真题库/
+
+# ===== 运行时产物 =====
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ===== 编辑器 =====
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ===== 日志与临时文件 =====
+docs/_logs/
+*.log
+_oneoff/
