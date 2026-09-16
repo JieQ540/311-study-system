@@ -23,7 +23,10 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 ROOT = Path(__file__).resolve().parents[1]   # 公开副本：相对路径
 # DSH_DB 覆盖只给测试用：把库指向副本，跑完删掉，绝不动真实数据（见 docs/交接文档.md §5.1）
-DB = Path(os.environ.get("DSH_DB") or _default_db())
+# 公开副本：优先用户自己的库，没有就用随包的种子题库（这样 clone 即能用）
+_LIVE_DB = ROOT / "data" / "kaoyan.db"
+_SEED_DB = ROOT / "data" / "kaoyan-seed.db"
+DB = Path(os.environ.get("DSH_DB") or (_LIVE_DB if _LIVE_DB.exists() else _SEED_DB))
 STATIC = ROOT / "app" / "static"
 INDEX = STATIC / "index.html"
 
@@ -48,21 +51,6 @@ def run_migrations():
     """
     ensure_schema()
     return backfill_point_outline(), unify_outline_levels()
-
-
-
-def _default_db():
-    """公开副本用：有 data/kaoyan.db 就用它，否则用随包的种子题库 data/kaoyan-seed.db。
-
-    为什么要回退：仓库里随包提供 `kaoyan-seed.db`（1075 道题、无个人数据），
-    这样 clone 下来**不配任何东西就能组卷做题**；用户的日常库仍然优先。
-    """
-    live, seed = ROOT / "data" / "kaoyan.db", ROOT / "data" / "kaoyan-seed.db"
-    if live.exists():
-        return live
-    if seed.exists():
-        return seed
-    return live          # 都没有：让原有报错路径去提示
 
 
 def rows(sql, args=()):
