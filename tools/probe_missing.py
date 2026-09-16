@@ -1,7 +1,8 @@
-﻿import sys, re
+import sys, re
 sys.stdout.reconfigure(encoding="utf-8")
 from docx import Document
-path = str(Path(__file__).resolve().parent.parent / "01 311考纲（扫描，仅作教学使用）_可搜索(1).docx")
+from paths import OUTLINE_DOCX
+path = OUTLINE_DOCX
 doc = Document(path)
 paras = []
 for p in doc.paragraphs:

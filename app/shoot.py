@@ -10,7 +10,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8")
 from playwright.async_api import async_playwright
 
-OUT = Path(Path(__file__).resolve().parent.parent / "source" / "_shots")
+OUT = Path(__file__).resolve().parents[1] / "source" / "_shots"
 OUT.mkdir(parents=True, exist_ok=True)
 BASE = "http://127.0.0.1:8765"
 

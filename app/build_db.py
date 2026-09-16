@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[1]   # 公开副本：相对路径
 DB = ROOT / "data" / "kaoyan.db"
 SKELETON = ROOT / "source" / "骨架.md"
 

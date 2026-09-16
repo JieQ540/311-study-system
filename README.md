@@ -29,9 +29,11 @@
 
 | 页面 | 路径 | 做什么 |
 | --- | --- | --- |
-| **模拟考试** | `/` | 按 311 真实结构组卷（45 单选 + 3 辨析 + 5 简答 + 3 分析论述，含 30 分必选题），180 分钟计时，客观题自动判分 |
+| **模拟考试** | `/` | 按 311 真实结构组卷（45 单选 + 3 辨析 + 5 简答 + 3 分析论述，含 30 分必选题），180 分钟计时，客观题自动判分；**交卷后可看每题答案与解析** |
 | **日常练习** | `/daily` | 两种入口：① 输入"今天学了什么"（自然语言）→ AI 定位考点 → 出题；② 一键**按薄弱点出题** |
 | **练习日志** | `/logs` | 每次练习的得分、采分点命中、以及**当时的薄弱点快照** |
+| **学习复盘** | `/reports` | 每次练习生成一份**基于数据**的 AI 学习报告（得分/失分考点/趋势/下一步），并画正确率趋势图 |
+| **薄弱点分析** | 各页入口 | 客观题对错 + 主观题采分点命中，按大纲考点聚合排序 |
 
 **行为细节**
 
@@ -83,22 +85,17 @@ attempts（客观题对错）  ┘
 
 ## 3. 快速开始
 
+> **本仓库已随包带题库**，clone 下来**不配任何东西**就能组卷、做题、判分、看薄弱点。
+> AI 功能（出题 / 批改 / 复盘）可选，需要自己的 DeepSeek API key。
+
 ### 依赖
 
 ```bash
-pip install fastapi "uvicorn[standard]" pymupdf rapidocr-onnxruntime opencv-python
+pip install fastapi "uvicorn[standard]"
 ```
 
-（`pymupdf` / `rapidocr` / `opencv` 仅数据管线需要；只跑服务的话 `fastapi` + `uvicorn` 就够）
-
-### 配置
-
-```bash
-cp config.example.json config.json
-# 编辑 config.json，填入 DeepSeek API key
-```
-
-`config.json` 已被 `.gitignore` 忽略，**不会被提交**。
+（只跑服务就够。数据管线另需 `pymupdf` / `rapidocr-onnxruntime` / `opencv-python`；
+批改手写照片不需要额外依赖，走 API 的多模态能力）
 
 ### 启动
 
@@ -109,14 +106,45 @@ cd app
 python -m uvicorn server:app --host 127.0.0.1 --port 8765
 ```
 
-打开 <http://127.0.0.1:8765>。
+打开 <http://127.0.0.1:8765> 即可开始做题。
 
-> **注意**：首次运行 `data/kaoyan.db` 是空的，页面能打开但没有题目，
-> 需要先按[第 7 节](#7-数据管线从-pdf-到题库)把题库建起来。
+**服务怎么找到题库**：优先用 `data/kaoyan.db`；没有就自动用随包的 `data/kaoyan-seed.db`。
+你想从零重建自己的库时，第一次写库会自动生成 `data/kaoyan.db` 并覆盖优先级。
 
-### 成本
+### 配置（可选，只有 AI 功能需要）
+
+```bash
+cp config.example.json config.json
+# 编辑 config.json，填入你自己的 DeepSeek API key
+```
+
+`config.json` 已被 `.gitignore` 忽略，**不会被提交**。
+没配 key 时不会崩：AI 相关接口会返回一句人话提示（"请先复制 config.example.json 并填入 key"），
+组卷、判分、薄弱点、练习日志照常可用。
 
 `deepseek-flash` 下，每天（解析记录 + 出题 + 批改 3 道主观题）约 **0.05 元**。DeepSeek 采用峰谷定价，晚间使用半价。
+
+### 随包数据（`data/kaoyan-seed.db`，约 1.8 MB）
+
+| 内容 | 数量 |
+| --- | --- |
+| 大纲节点 | 637 个（4 板块 › 35 章 › 135 节 › 441 考点） |
+| 题目 | **1057 道**（真题 1001，覆盖 2009–2026 共 18 个年份；AI 生成 56） |
+| 采分点 | **912 个**（每道主观题 3–6 个，全部挂到大纲考点） |
+| 个人数据 | **无**（作答记录 / 练习日志 / 复盘报告均为空，你自己用才有） |
+| 解析长文 | **不含**（见下） |
+
+**关于解析**：本仓库只收录**真题题干与官方答案**。客观题解析与主观题参考答案那部分
+逐字来自商业机构的解析书，未随仓库分发。想补全：
+把你的解析文本按 `YYYY年311教育学解析.md` 放进 `source/真题库/解析/`，然后
+
+```bash
+cd app
+python extract_explain.py            # 客观题解析 → extra.explain
+python extract_subjective_answer.py  # 主观题参考答案 → extra.answer_text
+```
+
+两个脚本都是**规则抽取、不调用 AI、不花钱**，跑完交卷后页面上就能看到解析。
 
 ---
 
@@ -209,7 +237,7 @@ UNION ALL ─▶ JOIN outline_nodes ─▶ GROUP BY 节点 ─▶ 命中率升�
 
 ## 5. 数据模型
 
-SQLite 单文件 `data/kaoyan.db`，7 张表。
+SQLite 单文件（随包的 `data/kaoyan-seed.db` 或你自己的 `data/kaoyan.db`），8 张表 + 3 个视图。
 
 ### outline_nodes — 大纲骨架
 
@@ -233,7 +261,7 @@ SQLite 单文件 `data/kaoyan.db`，7 张表。
 | `options` | JSON，如 `{"A":"…","B":"…"}` |
 | `answer` | 客观题答案（A/B/C/D） |
 | `outline_id` | → `outline_nodes.id`，挂载的考点 |
-| `extra` | JSON，主观题存 `{"full_score": 15}` |
+| `extra` | JSON，主观题存 `{"full_score": 15}`；抽过解析的话还有 `explain` / `answer_text` |
 
 ### points — 采分点（系统的核心资产）
 
@@ -262,17 +290,34 @@ SQLite 单文件 `data/kaoyan.db`，7 张表。
 
 `single_ids` / `subjective_ids`（JSON 数组，**保持顺序**）、`status`（`active` / `archived`）。
 
+### reports — 学习复盘报告
+
+`session_id` / `date` / `mode` / `content`（AI 生成的 Markdown 报告）/ `metrics`（当次量化快照 JSON）。
+
+### 三个视图（防止"查询漏过滤"这类静默错误）
+
+| 视图 | 作用 |
+| --- | --- |
+| `v_real_questions` | 只含真题（排除 `source LIKE 'AI%'`）。曾因漏加这个过滤，AI 题混进"真题优先"抽取且不报错 |
+| `v_questions_tagged` | 题目 + 其大纲节点名/路径/层级，省掉每次手写 JOIN |
+| `v_questions_ready` | 每题是否有解析 / 参考答案（`has_explain`、`has_answer_text`） |
+
+> 视图在 `server.py::ensure_schema()` 里每次启动重建（`DROP VIEW IF EXISTS` + `CREATE VIEW`），重建数据库后不会丢。
+
 ---
 
 ## 6. HTTP 接口
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| GET | `/` `/daily` `/logs` | 三个页面 |
+| GET | `/` `/daily` `/logs` `/reports` | 四个页面 |
 | GET | `/api/paper` | 取当前试卷（无 active 则新组一份） |
 | POST | `/api/save` | 提交作答：判分 + 写记录 + 写日志 |
 | GET | `/api/weakness` | 薄弱点排名（客观题 + 主观题合并统计） |
 | GET | `/api/logs` | 练习日志列表 |
+| POST | `/api/review/generate` | 给某次练习生成 AI 复盘报告（可重复生成=覆盖） |
+| GET | `/api/reports` | 报告列表 + 总体趋势 |
+| DELETE | `/api/reports/{id}` | 删报告（不动作答与日志） |
 | POST | `/api/ai/test` | AI 连通性自检 |
 | POST | `/api/daily/parse` | 学习记录 → 候选考点 |
 | POST | `/api/daily/generate` | 按指定考点出题 |
@@ -360,28 +405,31 @@ SQLite 单文件 `data/kaoyan.db`，7 张表。
 
 ```
 app/
-├── server.py               FastAPI：全部接口（业务 + SQL）
-├── ai.py                   AI 客户端：解析记录 / 出题 / 批改
+├── server.py               FastAPI：全部接口 + 建表/迁移/视图
+├── ai.py                   AI 客户端：解析记录 / 出题 / 批改 / 复盘
 ├── build_db.py             建库 + 导入大纲骨架
 ├── ingest_years.py         各年真题【单选】入库
 ├── ingest_subjective.py    各年真题【主观题】入库 + 拆采分点
-├── tag_questions.py        给题目挂大纲节
-├── fix_stems.py            题干补全 + 排版还原
-├── parse_2025.py           早期 2025 专用解析（已由 ingest_years 取代）
-├── import_points_2025.py   2025 主观题采分点（手工版）
+├── tag_questions.py        给题目挂大纲节（支持 --ids 定向挂载）
+├── backfill_missing_questions.py  定向补 AI 提取时漏掉的题
+├── extract_explain.py      客观题解析抽取（规则法，不调 AI）
+├── extract_subjective_answer.py   主观题参考答案抽取（规则法，不调 AI）
 ├── shoot.py                截图工具（Playwright）
 ├── static/
 │   ├── index.html          模拟考试
 │   ├── daily.html          日常练习
-│   └── logs.html           练习日志
-└── tests/                  回归测试（接口 / 流程 / 持久化）
+│   ├── logs.html           练习日志
+│   └── reports.html        学习复盘
+└── tests/                  回归测试
 
-data/kaoyan.db              所有数据（SQLite）
+data/kaoyan-seed.db         随包题库（1075 项，无个人数据、无解析长文）
+data/kaoyan.db              你自己的库（首次写库时自动生成，已 gitignore）
 source/
 ├── 骨架.md                 大纲层级
+├── 真题库/真题/            18 年真题【题干】文本
 └── 拆点-*.md               采分点拆解示例
 docs/                       方案、批改提示词、使用说明
-tools/                      PDF/OCR 与文本处理工具
+tools/                      PDF/OCR 与文本处理工具（paths.py 统一资源路径）
 config.example.json         配置模板
 启动系统.bat                 一键启动
 ```

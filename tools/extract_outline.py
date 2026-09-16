@@ -21,9 +21,10 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 from docx import Document
+from paths import OUTLINE_DOCX, OUTLINE_PDF  # noqa: E402
 
-DOCX = str(Path(__file__).resolve().parent.parent / "01 311考纲（扫描，仅作教学使用）_可搜索(1).docx")
-OUT_DIR = Path(Path(__file__).resolve().parent.parent / "source")
+DOCX = OUTLINE_DOCX
+OUT_DIR = Path(__file__).resolve().parents[1] / "source"
 
 WATERMARKS = ("夸克扫描王", "极速扫描", "后续关注", "永久微信", "扫码关注", "公众号")
 BOARDS = ("教育学原理", "中外教育史", "教育心理学", "教育研究方法")
@@ -255,6 +256,13 @@ def main():
             body.append(f"\n**{t}**")
         else:
             body.append(f"    {t}")
+
+    if "--dry-run" in sys.argv:
+        # 只验证「能读到 docx 且解析出结构」，不覆盖已提取好的 source/*.md
+        print("\n[dry-run] 未写出文件。解析结果统计：")
+        print(f"  骨架行数 {len(skel)}，正文行数 {len(body)}，"
+              f"题型示例 {len(sample)} 段，真题 {len(exam)} 段")
+        return
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     (OUT_DIR / "大纲-正文.md").write_text(

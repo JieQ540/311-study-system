@@ -1,9 +1,10 @@
-﻿import sys, re
+import sys, re
 from collections import Counter
 sys.stdout.reconfigure(encoding="utf-8")
 from docx import Document
+from paths import OUTLINE_DOCX, OUTLINE_PDF  # noqa: E402
 
-path = str(Path(__file__).resolve().parent.parent / "01 311考纲（扫描，仅作教学使用）_可搜索(1).docx")
+path = OUTLINE_DOCX
 doc = Document(path)
 
 WATER = ["夸克扫描王", "极速扫描", "后续关注", "永久微信", "研大"]

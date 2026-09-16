@@ -1,7 +1,8 @@
-﻿import sys, zipfile, re
+import sys, zipfile, re
 from collections import Counter
+from paths import OUTLINE_DOCX
 sys.stdout.reconfigure(encoding="utf-8")
-path = str(Path(__file__).resolve().parent.parent / "01 311考纲（扫描，仅作教学使用）_可搜索(1).docx")
+path = OUTLINE_DOCX
 with zipfile.ZipFile(path) as z:
     xml = z.read("word/document.xml").decode("utf-8", "ignore")
     parts = [n for n in z.namelist() if "header" in n or "footer" in n]

@@ -21,17 +21,31 @@ sys.stdout.reconfigure(encoding="utf-8")
 import urllib.error
 import urllib.request
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[1]   # 公开副本：相对路径
 CFG_PATH = ROOT / "config.json"
-DB = ROOT / "data" / "kaoyan.db"
+DB = ROOT / "data" / ("kaoyan.db" if (ROOT / "data" / "kaoyan.db").exists()
+                       else "kaoyan-seed.db")
 
 _CFG = None
 
 
+
+class ConfigMissing(RuntimeError):
+    """没有配置好 API。给使用者一句人话，而不是 traceback。"""
+
+
 def cfg():
+    """读取 config.json。缺文件或缺 key 时抛 ConfigMissing（比如刚 clone、还没配 key）。"""
     global _CFG
     if _CFG is None:
+        if not CFG_PATH.exists():
+            raise ConfigMissing(
+                "还没有配置文件：请把 config.example.json 复制成 config.json，"
+                "并填入你自己的 DeepSeek API key（AI 出题 / 批改 / 复盘都需要它）。")
         _CFG = json.loads(CFG_PATH.read_text(encoding="utf-8"))
+        key = (_CFG.get("api") or {}).get("api_key") or ""
+        if not key or key.startswith("在这里") or key == "sk-你的-key":
+            raise ConfigMissing("config.json 里的 api_key 还是占位符，请填入真实 key。")
     return _CFG
 
 
@@ -353,6 +367,74 @@ def grade_answer(question_stem, points, student_text=None, full_score=15,
         thinking=use_thinking,
     )
     return data, usage
+
+
+# ---------------------------------------------------------------- ④ 学习复盘
+
+REVIEW_SYS = """你是考研 311（教育学专业基础）的学习分析师。
+
+用户会给你他**某一次练习**的完整数据：得分、做了哪些考点的题、错在哪里、历史练习记录。
+
+请产出一份**基于数据**的学习报告，要求：
+
+1. **只根据给你的数据说话**。数据不足时明确说"样本太少，暂无法判断"，不要编造趋势。
+2. 必须包含这几块（Markdown）：
+   - **本次结果**：得分、题量、正确率，用具体数字
+   - **暴露的问题**：哪些**具体考点**失分（点名到考点，不要泛泛说"基础不牢"）
+   - **与历史对比**：仅在与历史可比时才写趋势，否则说明为何不能比
+   - **下次练什么**：2–3 条**可执行**建议，指明具体考点
+3. 语气客观，**不要空泛鼓励**（"你已经很棒了"这类一律不要）。
+4. 总长控制在 400 字以内，信息密度优先。
+"""
+
+
+def review_session(session, attempts_detail, weak_points, history_summary):
+    """生成一次练习的复盘报告。
+
+    session           sessions 表的一行
+    attempts_detail   本次作答明细（含题目类型、考点名、结果、错因）
+    weak_points       当前薄弱点列表
+    history_summary   历史 sessions 摘要（用于趋势对比）
+    """
+    lines = [
+        "【本次练习】",
+        f"日期：{session.get('date')}　模式：{session.get('mode')}",
+        f"客观题：{session.get('objective_right', 0)}/{session.get('objective_total', 0)} 对"
+        f"（得分 {session.get('objective_score', 0)}）",
+        f"主观自评：{session.get('subjective_count', 0)} 题，"
+        f"采分点命中 {session.get('point_hits', 0)}/{session.get('point_total', 0)}",
+    ]
+    if session.get("note"):
+        lines.append(f"备注：{session['note']}")
+
+    lines.append("\n【本次作答明细】（题型 → 考点 → 结果）")
+    for a in attempts_detail[:40]:
+        h = a.get("hits")
+        res = "对" if h == 1 else ("错" if h == 0 else f"命中 {h}/{a.get('total')}")
+        extra = f"（错因：{a['cause']}）" if a.get("cause") else ""
+        lines.append(f"- {a.get('qtype')} → {a.get('node_name') or '未挂考点'} → {res}{extra}")
+
+    lines.append("\n【当前薄弱考点】（命中率升序前 10）")
+    for w in weak_points[:10]:
+        lines.append(f"- {w.get('name')}：{w.get('hit_n')}/{w.get('total_n')}"
+                     f"（{w.get('rate', 0)*100:.0f}%）｜{w.get('path', '')}")
+
+    lines.append("\n【历史练习记录】（最多 10 次）")
+    if history_summary:
+        for h in history_summary[:10]:
+            lines.append(f"- {h.get('date')} {h.get('mode')}：客观 "
+                         f"{h.get('objective_right', 0)}/{h.get('objective_total', 0)}，"
+                         f"采分点 {h.get('point_hits', 0)}/{h.get('point_total', 0)}")
+    else:
+        lines.append("- （无历史记录。本次是第一次，请明确说明无法做趋势对比）")
+
+    user = "\n".join(lines) + "\n\n请输出学习报告（Markdown）。"
+    content, usage = chat(
+        [{"role": "system", "content": REVIEW_SYS}, {"role": "user", "content": user}],
+        max_tokens=1500,
+        temperature=0.4,
+    )
+    return content.strip(), usage
 
 
 # ---------------------------------------------------------------- 连通性自检

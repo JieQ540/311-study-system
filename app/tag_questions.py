@@ -7,8 +7,13 @@
 策略：分批把题干 + 大纲节清单交给 AI，让它为每题选一个 section。
       挂到 section 级（不是 point），因为单选考的是小知识点，
       section 粒度足够用于抽题，且更稳。
+
+用法：
+    python tag_questions.py                  # 全部未挂载的真题
+    python tag_questions.py --ids 1123,1124  # 只挂指定题目（补题后定向挂载用）
 """
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -18,17 +23,21 @@ sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, str(Path(__file__).parent))
 import ai
 
-DB = Path(Path(__file__).resolve().parent.parent / "data" / "kaoyan.db")
+# 与 server.py 一致：DSH_DB 可把库指向副本
+ROOT = Path(__file__).resolve().parents[1]   # 公开副本：相对路径
+DB = Path(os.environ.get("DSH_DB") or (ROOT / "data" / "kaoyan.db"))
 BATCH = 8
 
 SYS = """你是 311 教育学考纲归类助手。
-下面给你若干道选择题的题干，以及可选的**大纲节(section)清单**。
+下面给你若干道题的题干，以及可选的**大纲节(section)清单**。
 请为每道题选出它考查的**一个** section，返回 JSON。
 
 规则：
 1. 只能从清单里选，输出其 id。
 2. 若实在无法判断，id 用 null。
-3. 返回：{"tags":[{"qid":题目id,"section_id":节点id,"reason":"简短依据"}]}
+3. 单选题、辨析题、简答题、分析论述题都按同一口径：选**这道题主要考的那一节**。
+   分析论述题若跨多节，选最核心的一节。
+4. 返回：{"tags":[{"qid":题目id,"section_id":节点id,"reason":"简短依据"}]}
 """
 
 
@@ -42,21 +51,33 @@ def sections():
     return [dict(r) for r in rows]
 
 
-def pending():
+def pending(only_ids=None):
     con = sqlite3.connect(DB)
     con.row_factory = sqlite3.Row
-    rows = con.execute(
-        "SELECT id,number,substr(stem,1,300) AS stem FROM questions "
-        "WHERE (outline_id IS NULL OR outline_id=0) AND source LIKE '%真题%' "
-        "ORDER BY CAST(number AS INTEGER)"
-    ).fetchall()
+    if only_ids:
+        qs = ",".join("?" * len(only_ids))
+        rows = con.execute(
+            f"SELECT id,number,substr(stem,1,600) AS stem FROM questions "
+            f"WHERE id IN ({qs}) ORDER BY id", only_ids).fetchall()
+    else:
+        rows = con.execute(
+            "SELECT id,number,substr(stem,1,300) AS stem FROM questions "
+            "WHERE (outline_id IS NULL OR outline_id=0) AND source LIKE '%真题%' "
+            "ORDER BY CAST(number AS INTEGER) NULLS FIRST"
+        ).fetchall()
     con.close()
     return [dict(r) for r in rows]
 
 
 def main():
+    only = None
+    if "--ids" in sys.argv:
+        raw = sys.argv[sys.argv.index("--ids") + 1]
+        only = [int(x) for x in raw.split(",") if x.strip().isdigit()]
+        print(f"定向挂载 {len(only)} 道：{only}")
+
     secs = sections()
-    qs = pending()
+    qs = pending(only)
     if not qs:
         print("没有待归类的题目")
         return

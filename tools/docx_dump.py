@@ -1,9 +1,10 @@
-﻿import sys
+import sys
 sys.stdout.reconfigure(encoding="utf-8")
 from docx import Document
 from docx.shared import Pt
+from paths import OUTLINE_DOCX, OUTLINE_PDF  # noqa: E402
 
-path = str(Path(__file__).resolve().parent.parent / "01 311考纲（扫描，仅作教学使用）_可搜索(1).docx")
+path = OUTLINE_DOCX
 doc = Document(path)
 print("段落总数:", len(doc.paragraphs))
 print()

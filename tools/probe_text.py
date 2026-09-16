@@ -1,8 +1,9 @@
-﻿import sys
+import sys
 sys.stdout.reconfigure(encoding="utf-8")
 import fitz
+from paths import OUTLINE_PDF
 
-path = str(Path(__file__).resolve().parent.parent / "01 311考纲（扫描，仅作教学使用）_可搜索(1).pdf")
+path = OUTLINE_PDF
 doc = fitz.open(path)
 print("pages:", doc.page_count)
 for i in (2, 3):

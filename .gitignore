@@ -4,7 +4,10 @@ config.json
 .env
 
 # ===== 个人数据 =====
+# data/kaoyan-seed.db 是**随包提供的干净题库**（无个人数据、无解析长文），要进仓库；
+# 你自己的日常库 data/kaoyan.db 不上传。
 data/*.db
+!data/kaoyan-seed.db
 data/*.db-wal
 data/*.db-shm
 data/*.bak*
@@ -13,14 +16,20 @@ source/_shots/
 source/pages/
 source/pages_*/
 
-# ===== 版权资料（真题/教辅 PDF，请勿分发）=====
+# ===== 版权资料 =====
+# 随包提供：真题【题干】文本（source/真题库/真题/）—— 不含解析
+# 不上传：解析文本（逐字来自商业机构解析书）、教辅 PDF/扫描件、大纲正文全文
 *.pdf
+*.docx
+source/原始资料/
+source/真题库/解析/
+source/真题部分.md
+source/大纲-正文.md
 01-311教育学真题*/
 02-311教育学解析*/
 311核心框架/
 311知识清单/
 311考试题库/
-source/真题库/
 
 # ===== 运行时产物 =====
 __pycache__/

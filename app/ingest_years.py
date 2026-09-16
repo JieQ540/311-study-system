@@ -20,7 +20,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, str(Path(__file__).parent))
 import ai
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[1]   # 公开副本：相对路径
 DB = ROOT / "data" / "kaoyan.db"
 DIR_Q = ROOT / "source" / "真题库" / "真题"
 DIR_A = ROOT / "source" / "真题库" / "解析"

@@ -49,6 +49,13 @@
   .per para, .per p { margin:6px 0; }
   .kp { font-size:13px; color:var(--muted); }
   .extra { background:#fffbea; border-left:3px solid #ecc94b; padding:6px 10px; margin:6px 0; font-size:13px; }
+  /* 客观题答案 + 解析（默认隐藏，提交/点按钮后才显示） */
+  details.qans { margin-top:8px; }
+  details.qans[hidden] { display:none; }
+  details.qans summary { cursor:pointer; font-size:13px; color:var(--accent); }
+  details.qans .explain { margin-top:6px; padding:10px 12px; background:#f7fafc;
+    border-left:3px solid var(--accent); border-radius:4px; font-size:13.5px;
+    white-space:pre-wrap; line-height:1.75; }
 </style>
 </head>
 <body>
@@ -64,6 +71,7 @@
   <span class="muted" id="usage"></span>
   <a href="/" class="muted" style="text-decoration:none">← 模拟考试</a>
   <a href="/logs" class="muted" style="text-decoration:none">练习日志</a>
+  <a href="/reports" class="muted" style="text-decoration:none">学习复盘</a>
 </header>
 
 <main>
@@ -98,6 +106,7 @@
     <div id="paper"></div>
     <div class="row">
       <button onclick="submitAll()" id="btnSubmit">提交并保存</button>
+      <button class="ghost" onclick="toggleDailyAnswers()" id="btnDailyAnswers">显示答案解析</button>
       <button class="ghost" onclick="doGenerate()">再练一组</button>
       <span class="muted" id="msg3"></span>
     </div>
@@ -116,7 +125,7 @@
 </main>
 
 <script>
-let MATCHES = [], PAPER = null, SUBJECTIVE_IDS = [];
+let MATCHES = [], PAPER = null, SUBJECTIVE_IDS = [], SESSION_ID = null;
 
 const $ = id => document.getElementById(id);
 
@@ -230,6 +239,26 @@ function normSubj(q, srcTag) {
            points:q.points || [], outline:q.outline_id };
 }
 
+// 客观题答案 + 解析：默认隐藏，提交/点按钮后才显示（数据在 questions.extra.explain）
+function dailyExplain(q) {
+  try { return (JSON.parse(q.extra || '{}').explain) || ''; } catch (e) { return ''; }
+}
+function dailyAnswerHtml(q) {
+  const ex = dailyExplain(q);
+  if (!ex) return '';
+  return `<details class="qans" hidden>
+      <summary>正确答案 <b>${q.answer || '—'}</b> ｜ 看解析</summary>
+      <div class="explain"><b>答案：${q.answer || '—'}</b>${ex.replace(/</g,'&lt;')}</div>
+    </details>`;
+}
+function toggleDailyAnswers() {
+  const all = [...document.querySelectorAll('#paper details.qans')];
+  const show = all.some(d => d.hidden);
+  all.forEach(d => { d.hidden = !show; d.open = show; });
+  const btn = document.getElementById('btnDailyAnswers');
+  if (btn) btn.textContent = show ? '收起答案解析' : '显示答案解析';
+}
+
 function renderPaper(r) {
   const real = r.paper.real, gen = r.paper.generated || {single:[],subjective:[]};
   const singles = [...(real.single||[]).map(q => normSingle(q,'真题')),
@@ -250,6 +279,7 @@ function renderPaper(r) {
           <span class="tag ${q.tag==='真题'?'real':'ai'}">${q.tag}</span></div>
         ${Object.entries(q.options).map(([k,v]) =>
           `<label class="opt"><input type="radio" name="sq${q.id}" value="${k}"><b>${k}.</b> ${v}</label>`).join('')}
+        ${dailyAnswerHtml(q)}
       </div>`).join('') || '<p class="muted">（本次没有客观题）</p>'}
 
     <h3 style="font-size:14px;margin:22px 0 10px">二、主观题（在纸上作答）</h3>
@@ -273,7 +303,19 @@ function renderPaper(r) {
         </div>
         <textarea id="ans-${q.id}" placeholder="（可选）把你的作答文本敲进来，或把照片交给 AI 批改。用 AI 批改时必须填这里。" style="min-height:70px;margin-top:8px"></textarea>
         <div class="grade" id="grade-${q.id}" hidden></div>
+        ${dailySubjAnswerHtml(q)}
       </div>`).join('') || '<p class="muted">（本次没有主观题）</p>'}`;
+}
+
+// 主观题参考答案（同样默认隐藏）
+function dailySubjAnswerHtml(q) {
+  let txt = '';
+  try { txt = (JSON.parse(q.extra || '{}').answer_text) || ''; } catch (e) { txt = ''; }
+  if (!txt) return '';
+  return `<details class="qans" hidden>
+      <summary>参考答案（做完再对照）</summary>
+      <div class="explain">${txt.replace(/</g,'&lt;')}</div>
+    </details>`;
 }
 
 function togglePts(id, btn) {
@@ -388,13 +430,39 @@ async function submitAll() {
       <p class="score">客观题：${s.single_score} / ${s.single * 2} 分
         <span class="muted" style="font-size:13px;font-weight:400">（答对 ${s.single_right}/${s.single}）</span></p>
       <p class="muted">主观自评 ${s.subjective} 题 ｜ 记录采分点命中 ${s.point_hits} 个 ｜ 日期 ${r.date}</p>
-      <p class="muted">主观题若已用 AI 批改，结果不入命中率统计（避免 AI 情绪分污染薄弱点）。</p>`;
+      <p class="muted">主观题若已用 AI 批改，结果不入命中率统计（避免 AI 情绪分污染薄弱点）。</p>
+      <div class="row">
+        <button onclick="genReview()" id="btnReview">生成 AI 学习复盘</button>
+        <span class="muted" id="msgReview">让 AI 基于本次作答 + 历史记录出一份报告</span>
+      </div>`;
+    SESSION_ID = s.session_id || null;
     $('msg3').textContent = '';
     goStep(4);
+    // 提交后自动放出客观题解析与主观题参考答案
+    document.querySelectorAll('#paper details.qans').forEach(d => { d.hidden = false; });
   } catch (e) {
     $('msg3').textContent = '出错: ' + e;
   } finally {
     $('btnSubmit').disabled = false;
+  }
+}
+
+async function genReview() {
+  if (!SESSION_ID) {
+    $('msgReview').textContent = '这次没有拿到练习记录 id（保存时可能出错了），去「学习复盘」页手动生成。';
+    return;
+  }
+  $('btnReview').disabled = true;
+  $('msgReview').textContent = 'AI 分析中…（约 10–20 秒）';
+  try {
+    const r = await post('/api/review/generate', { session_id: SESSION_ID });
+    if (!r.ok) { $('msgReview').textContent = '失败: ' + r.error; return; }
+    showUsage(r.usage, 'usage');
+    $('msgReview').innerHTML = '报告已生成 → <a href="/reports">去「学习复盘」看</a>';
+  } catch (e) {
+    $('msgReview').textContent = '出错: ' + e;
+  } finally {
+    $('btnReview').disabled = false;
   }
 }
 

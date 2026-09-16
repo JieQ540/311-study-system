@@ -33,6 +33,13 @@
   .pt { padding:3px 0; font-size:14px; }
   .pt input { margin-right:8px; }
   .pt .ev { color:var(--muted); font-size:12px; }
+  /* 客观题答案 + 解析（默认隐藏，提交后或点按钮才显示） */
+  details.qans { margin-top:8px; }
+  details.qans[hidden] { display:none; }
+  details.qans summary { cursor:pointer; font-size:13px; color:var(--accent); }
+  details.qans .explain { margin-top:6px; padding:10px 12px; background:#f7fafc;
+    border-left:3px solid var(--accent); border-radius:4px; font-size:13.5px;
+    white-space:pre-wrap; line-height:1.75; }
   select.cause { font-size:13px; padding:2px 4px; margin-top:8px; }
   .bar { position:sticky; bottom:0; background:#fff; border-top:1px solid var(--line);
          padding:12px 18px; display:flex; gap:12px; align-items:center; }
@@ -62,6 +69,7 @@
   <div style="flex:1"></div>
   <a href="/daily" class="meta" style="text-decoration:none;color:var(--accent)">日常练习 →</a>
   <a href="/logs" class="meta" style="text-decoration:none;color:var(--accent)">练习日志</a>
+  <a href="/reports" class="meta" style="text-decoration:none;color:var(--accent)">学习复盘</a>
   <button class="ghost" onclick="loadWeakness()">看薄弱点</button>
   <button class="ghost" onclick="rebuild()">重新组卷</button>
 </header>
@@ -75,6 +83,7 @@
 
 <div class="bar">
   <button onclick="submitAll()">提交并保存</button>
+  <button class="ghost" onclick="toggleAnswers()" id="btnAnswers">显示答案解析</button>
   <button class="ghost" onclick="location.reload()">重新开始</button>
   <span id="msg"></span>
 </div>
@@ -89,8 +98,47 @@ const fmt = s => {
   return m + ':' + q;
 };
 
-async function boot(doRebuild) {
-  const r = await fetch('/api/paper' + (doRebuild ? '?rebuild=1' : ''));
+// 客观题的「正确答案 + 解析」：默认隐藏，提交后（或点按钮）才显示。
+// 数据来自 questions.extra.explain（由 app/extract_explain.py 从真题解析文件抽取）
+function qExplain(q) {
+  try { return (JSON.parse(q.extra || '{}').explain) || ''; } catch (e) { return ''; }
+}
+function renderQAnswer(q) {
+  const ex = qExplain(q);
+  if (!ex) return '';
+  return `<details class="qans" hidden>
+      <summary>正确答案 <b>${q.answer || '—'}</b> ｜ 看解析</summary>
+      <div class="explain"><b>答案：${q.answer || '—'}</b>${ex.replace(/</g,'&lt;')}</div>
+    </details>`;
+}
+// 提交后统一放出来（客观题解析 + 主观题参考答案）
+function revealAnswers() {
+  document.querySelectorAll('#singles details.qans, #subjectives details.qans')
+    .forEach(d => { d.hidden = false; });
+}
+function toggleAnswers() {
+  const all = [...document.querySelectorAll('#singles details.qans, #subjectives details.qans')];
+  const show = all.some(d => d.hidden);
+  all.forEach(d => { d.hidden = !show; d.open = show; });
+  const btn = document.getElementById('btnAnswers');
+  if (btn) btn.textContent = show ? '收起答案解析' : '显示答案解析';
+}
+
+// 主观题的「参考答案」：和客观题一样默认隐藏，提交/点按钮后显示
+function subjAnswerHtml(q) {
+  let txt = '';
+  try { txt = (JSON.parse(q.extra || '{}').answer_text) || ''; } catch (e) { txt = ''; }
+  if (!txt) return '';
+  return `<details class="qans" hidden>
+      <summary>参考答案（做完再对照）</summary>
+      <div class="explain">${txt.replace(/</g,'&lt;')}</div>
+    </details>`;
+}
+function revealSubjAnswers() {
+  document.querySelectorAll('#subjectives details.qans').forEach(d => { d.hidden = false; });
+}
+
+async function boot(doRebuild) {  const r = await fetch('/api/paper' + (doRebuild ? '?rebuild=1' : ''));
   PAPER = await r.json();
   window.__PAPER_ID = PAPER.paper_id;   // 暴露给调试与自动化测试（let 不会挂到 window 上）
 
@@ -107,6 +155,7 @@ async function boot(doRebuild) {
       ${Object.entries(q.options).map(([k,v]) => `
         <label class="opt"><input type="radio" name="q${q.id}" value="${k}"><b>${k}.</b> ${v}</label>
       `).join('')}
+      ${renderQAnswer(q)}
     </div>`).join('');
 
   const t = document.getElementById('subjectives');
@@ -132,6 +181,7 @@ async function boot(doRebuild) {
         onclick="document.getElementById('pts-${q.id}').style.display='block';this.style.display='none'">
         展开采分点自评（做完再看）
       </button>
+      ${subjAnswerHtml(q)}
       <div class="row" style="margin-top:8px">
         <button class="ghost mini" onclick="aiGrade(${q.id})">AI 批改（用下方文本）</button>
         <button class="ghost mini" onclick="document.getElementById('file-${q.id}').click()">上传手写照片批改</button>
@@ -278,8 +328,37 @@ async function submitAll() {
   rb.innerHTML = `<p style="font-size:22px;margin:4px 0"><b>客观题得分：${j.saved.single_score} / 90 分</b>
       <span style="font-size:14px;color:#777">（答对 ${j.saved.single_right} / ${j.saved.single} 题，每题 2 分）</span></p>
     <p style="color:#777;font-size:13px">日期 ${j.date} ｜ 主观自评 ${j.saved.subjective} 题 ｜ 记录采分点命中 ${j.saved.point_hits} 个</p>
-    <p style="font-size:13px">主观题可用每道题下面的「AI 批改」或「上传手写照片批改」；也可自行展开采分点勾选。</p>`;
+    <p style="font-size:13px">主观题可用每道题下面的「AI 批改」或「上传手写照片批改」；也可自行展开采分点勾选。</p>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px">
+      <button onclick="genReview(${j.saved.session_id || 'null'}, this)">生成 AI 学习复盘</button>
+      <span style="font-size:13px;color:#777" id="reviewMsg">基于本次作答 + 历史记录出一份学习报告</span>
+    </div>`;
   document.getElementById('result').style.display = 'block';
+  // 提交后自动放出客观题的正确答案与解析（考前不显示，避免偷看）
+  try { revealAnswers(); } catch (e) {}
+}
+
+async function genReview(sid, btn) {
+  const msg = document.getElementById('reviewMsg');
+  if (!sid) { msg.textContent = '这次没拿到练习记录 id，去「学习复盘」页手动生成。'; return; }
+  btn.disabled = true;
+  msg.textContent = 'AI 分析中…（约 10–20 秒）';
+  try {
+    const r = await fetch('/api/review/generate', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ session_id: sid })
+    });
+    const j = await r.json();
+    if (!j.ok) { msg.textContent = '失败：' + (j.error || '未知错误'); return; }
+    const u = j.usage || {};
+    const est = (u.prompt_tokens||0)/1e6*1 + (u.completion_tokens||0)/1e6*4;
+    msg.innerHTML = `报告已生成（tokens ${u.prompt_tokens||0}/${u.completion_tokens||0} ≈ ${est.toFixed(4)} 元）
+      → <a href="/reports" style="color:var(--accent)">去「学习复盘」看</a>`;
+  } catch (e) {
+    msg.textContent = '出错：' + e;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ===== 主观题 AI 批改（与日常练习共用同一份 311 批改提示词）=====
