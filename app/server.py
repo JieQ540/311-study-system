@@ -681,6 +681,22 @@ def ai_test():
         return {"ok": False, "error": str(e)}
 
 
+def _match_ids(data):
+    """从解析结果里取考点 id，**容错**：AI 可能把 id 返回成字符串 "304"。
+
+    为什么必须容错：以前只接受 `isinstance(x, int)`，若模型回了 `"304"` 就会被静默丢掉，
+    最后报「请先写今天学了什么」——用户明明写了，却被说没写（这个 bug 真出现过）。
+    """
+    out = []
+    for m in (data or {}).get("matches", []) or []:
+        v = m.get("id")
+        try:
+            out.append(int(v))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 @app.post("/api/daily/parse")
 def daily_parse(payload: dict):
     """① 自然语言学习记录 → 候选考点（供你增删确认）。"""
@@ -693,7 +709,7 @@ def daily_parse(payload: dict):
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
     # 补齐每个候选节点的路径与下属考点数，便于前端展示
-    ids = [m["id"] for m in data.get("matches", []) if isinstance(m.get("id"), int)]
+    ids = _match_ids(data)
     info = {}
     if ids:
         con = sqlite3.connect(DB)
@@ -856,15 +872,27 @@ def daily_ai_set(payload: dict):
     text = (payload.get("user_text") or "").strip()
     ids = payload.get("point_ids") or []
     n_single = int(payload.get("n_single", 20))
+    parse_error = None
 
     if not ids and text:
         try:
             data, _ = ai_mod.parse_study_log(text)
         except Exception as e:
             return {"ok": False, "error": f"定位考点失败：{type(e).__name__}: {e}"}
-        ids = [m["id"] for m in data.get("matches", []) if isinstance(m.get("id"), int)]
+        ids = _match_ids(data)
+        if not ids:
+            # 不要再甩「请先写今天学了什么」——文本明明收到了。把真实原因说清楚。
+            preview = text[:40] + ("…" if len(text) > 40 else "")
+            unmatched = (data or {}).get("unmatched") or []
+            parse_error = (f"没从这段记录里定位到考点（收到的文本：「{preview}」）。"
+                           f"可以写得更具体些（如「背诵外国教育史第五章：夸美纽斯、卢梭」），"
+                           f"或改用上面的「解析并定位考点」手动勾选。"
+                           + (f" 未识别内容：{unmatched[:3]}" if unmatched else ""))
     if not ids:
-        return {"ok": False, "error": "请先写今天学了什么，或指定考点"}
+        return {"ok": False,
+                "error": parse_error or "没有可用的考点：请先写今天学了什么，或在请求里指定考点。",
+                "received_text_len": len(text),
+                "hint": "如果这段文字是你写的，说明是定位环节失败；请截图这段文字反馈。"}
 
     con = sqlite3.connect(DB)
     con.row_factory = sqlite3.Row
@@ -872,6 +900,12 @@ def daily_ai_set(payload: dict):
     points = [dict(r) for r in con.execute(
         f"SELECT id,name,path FROM outline_nodes WHERE id IN ({qs})", ids)]
     con.close()
+    if not points:
+        # 定位到了 id 但库里查不到（例如解析给了不存在的节点）——
+        # 这里若不拦住，AI 会拿到空考点清单，出一套跑题的题且不报错
+        return {"ok": False,
+                "error": f"定位到的考点 id 在库里不存在：{ids[:5]}。请改用上面的「解析并定位考点」手动确认。",
+                "matched_ids": ids[:10]}
 
     topics = ai_mod.hot_topics()
     try:
@@ -879,7 +913,13 @@ def daily_ai_set(payload: dict):
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
-    saved = _insert_ai_questions(paper)
+    # 试跑模式：只生成、**不入库**（给自动化验证用，避免测试往真实库写题）
+    dry_run = bool(payload.get("dry_run")) or os.environ.get("AI_SET_DRY_RUN") == "1"
+    if dry_run:
+        saved = {"single": [dict(q, id=None) for q in paper["single"]],
+                 "subjective": [dict(q, id=None) for q in paper["subjective"]]}
+    else:
+        saved = _insert_ai_questions(paper)
 
     # 做题前的自检报告：程序层硬校验（不信 AI 自评）+ AI 质检 + 重出记录
     from collections import Counter
@@ -938,6 +978,7 @@ def daily_ai_set(payload: dict):
         },
         "report": report,
         "usage": usage,
+        "dry_run": dry_run,
     }
 
 

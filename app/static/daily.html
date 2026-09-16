@@ -168,7 +168,20 @@ async function doAiSet() {
   $('msg1').textContent = '生成中：先定位考点 → 出 20 单选 + 3 主观 → 质量自检（约 1–3 分钟，请勿关页面）…';
   try {
     const r = await post('/api/daily/ai-set', { user_text: text });
-    if (!r.ok) { $('msg1').textContent = '失败：' + (r.error || '未知'); return; }
+    if (!r.ok) {
+      // 把失败原因完整显示出来（含服务端回显的文本长度），方便你截图反馈
+      $('msg1').innerHTML = '';
+      $('aiSetReport').innerHTML = `
+        <div class="card" style="border-left:3px solid var(--bad);margin-top:12px">
+          <h4 style="color:var(--bad)">生成失败</h4>
+          <div>${(r.error || '未知错误')}</div>
+          ${r.received_text_len !== undefined
+            ? `<div class="kp">服务端收到的学习记录长度：${r.received_text_len} 字</div>` : ''}
+          ${r.matched_ids ? `<div class="kp">定位到的考点 id：${r.matched_ids.join(', ')}</div>` : ''}
+          ${r.hint ? `<div class="kp">${r.hint}</div>` : ''}
+        </div>`;
+      return;
+    }
     PAPER = r.paper;
     renderPaper(r);
     showUsage(r.usage, 'usage');
