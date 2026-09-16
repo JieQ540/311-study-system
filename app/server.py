@@ -787,6 +787,160 @@ def daily_generate(payload: dict):
     }
 
 
+def _insert_ai_questions(generated, strict_points=True):
+    """把 AI 生成的题写库（单选带解析；主观题连采分点），返回入库后的对象。
+
+    为什么要入库：没有 id 就无法批改、无法记录成绩、无法算薄弱点。
+    """
+    con = sqlite3.connect(DB)
+    out = {"single": [], "subjective": []}
+    try:
+        for q in generated.get("single", []):
+            cur = con.execute(
+                "INSERT INTO questions (year,source,qtype,number,stem,options,answer,outline_id,extra) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (None, "AI生成", "single", None, q.get("stem", ""),
+                 json.dumps(q.get("options") or {}, ensure_ascii=False),
+                 q.get("answer"), q.get("outline_id"),
+                 json.dumps({"explain": q.get("explain", ""),
+                             "cognitive": q.get("cognitive", ""),
+                             "difficulty": q.get("difficulty")}, ensure_ascii=False)))
+            q["id"] = cur.lastrowid
+            out["single"].append(q)
+        for q in generated.get("subjective", []):
+            pts = q.get("points") or []
+            if strict_points and len(pts) < 2:
+                continue          # 没采分点的主观题无法自评，不入库（免得又造死题）
+            cur = con.execute(
+                "INSERT INTO questions (year,source,qtype,number,stem,extra,outline_id) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (None, "AI生成", q.get("qtype", "short"), None, q.get("stem", ""),
+                 json.dumps({"full_score": q.get("full_score", 15),
+                             "difficulty": q.get("difficulty")}, ensure_ascii=False),
+                 q.get("outline_id")))
+            qid = cur.lastrowid
+            q["id"] = qid
+            for p in pts:
+                con.execute(
+                    "INSERT INTO points (question_id,seq,claim,evidence,outline_id) VALUES (?,?,?,?,?)",
+                    (qid, p.get("seq"), p.get("claim", ""), p.get("evidence"), q.get("outline_id")))
+            out["subjective"].append(q)
+        con.commit()
+    finally:
+        con.close()
+    return out
+
+
+def _mark_topics_used(topics):
+    """在热点清单里给用过的条目打 [已用于出题]，下次优先换别的（只标记标题那一行）。"""
+    p = ROOT / "source" / "教育热点.md"
+    if not p.exists() or not topics:
+        return
+    txt = p.read_text(encoding="utf-8")
+    for t in topics[:2]:                       # 论述题通常只用一条
+        head = f"## {t['date']} ｜ {t['title']}"
+        if head in txt and "[已用于出题]" not in head:
+            txt = txt.replace(head, head + " [已用于出题]", 1)
+    p.write_text(txt, encoding="utf-8")
+
+
+@app.post("/api/daily/ai-set")
+def daily_ai_set(payload: dict):
+    """③b 全 AI 模拟组：主题由「今天学了什么」决定，题目**全部 AI 原创、不含真题**。
+
+    与 `/api/daily/generate` 的区别：那个是「真题优先 + AI 补缺」，这个是**刻意不用真题**，
+    用来练真题还没覆盖到的角度；且最后一题论述题必须带材料、取材于真实政策热点。
+
+    payload.user_text 给了就自己解析考点（不用先走 /parse）；也可直接传 point_ids。
+    """
+    text = (payload.get("user_text") or "").strip()
+    ids = payload.get("point_ids") or []
+    n_single = int(payload.get("n_single", 20))
+
+    if not ids and text:
+        try:
+            data, _ = ai_mod.parse_study_log(text)
+        except Exception as e:
+            return {"ok": False, "error": f"定位考点失败：{type(e).__name__}: {e}"}
+        ids = [m["id"] for m in data.get("matches", []) if isinstance(m.get("id"), int)]
+    if not ids:
+        return {"ok": False, "error": "请先写今天学了什么，或指定考点"}
+
+    con = sqlite3.connect(DB)
+    con.row_factory = sqlite3.Row
+    qs = ",".join("?" * len(ids))
+    points = [dict(r) for r in con.execute(
+        f"SELECT id,name,path FROM outline_nodes WHERE id IN ({qs})", ids)]
+    con.close()
+
+    topics = ai_mod.hot_topics()
+    try:
+        paper, usage, check = ai_mod.generate_ai_set(text, points, n_single=n_single, topics=topics)
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    saved = _insert_ai_questions(paper)
+
+    # 做题前的自检报告：程序层硬校验（不信 AI 自评）+ AI 质检 + 重出记录
+    from collections import Counter
+    cog = [q.get("cognitive") for q in saved["single"]]
+    n_remember = sum(1 for c in cog if c in ("识记", "记忆", None, ""))
+    answers = [(q.get("answer") or "").upper() for q in saved["single"]]
+    dist = Counter(a for a in answers if a)
+    n_pts = [len(q.get("points") or []) for q in saved["subjective"]]
+    essay = [q for q in saved["subjective"] if q.get("qtype") == "essay"]
+    audit = (check or {}).get("program_audit") or {}
+
+    report = {
+        "single_n": len(saved["single"]),
+        "subjective_n": len(saved["subjective"]),
+        "cognitive": dict(Counter(c or "未标" for c in cog)),
+        "remember_n": n_remember,
+        "answer_dist": dict(dist),
+        "answer_top_share": round(max(dist.values()) / max(1, sum(dist.values())), 2) if dist else 0,
+        "points_per_subjective": n_pts,
+        "essay_has_material": bool(essay and ("材料" in (essay[0].get("stem") or "")
+                                             or "\n" in (essay[0].get("stem") or ""))),
+        "topics_used": [{"date": t["date"], "title": t["title"]} for t in topics[:1]],
+        # 程序层硬校验结果（确定性的那几项）
+        "program_issues": audit.get("issues", []),
+        "attempts": (check or {}).get("attempts"),
+        "final_ok": (check or {}).get("final_ok"),
+        "retry_history": [
+            {"attempt": h["attempt"], "ai_pass": h.get("ai_pass"),
+             "ai_must_retry": h.get("ai_must_retry"),
+             "issue_n": len(h.get("issues") or []),
+             "issues": [f"[{i.get('type')}] {i.get('target')}：{str(i.get('detail'))[:60]}"
+                        for i in (h.get("issues") or [])[:6]]}
+            for h in ((check or {}).get("history") or [])
+        ],
+        "ai_check": (check or {}).get("ai_check") or {},
+    }
+    if payload.get("mark_topics", True):
+        try:
+            _mark_topics_used(topics)
+        except Exception as e:
+            report["mark_topics_error"] = f"{type(e).__name__}: {e}"
+
+    return {
+        "ok": True,
+        "focus": [{"id": p["id"], "name": p["name"], "path": p["path"]} for p in points],
+        "paper": {"real": {"single": [], "subjective": []}, "generated": saved},
+        # 前端 renderPaper 会读这两个计数（第一版漏了，页面上显示成 "undefined 道"）
+        "real_count": 0,
+        "generated_count": len(saved["single"]) + len(saved["subjective"]),
+        "counts": {
+            "single": len(saved["single"]),
+            "analysis": sum(1 for q in saved["subjective"] if q.get("qtype") == "analysis"),
+            "short": sum(1 for q in saved["subjective"] if q.get("qtype") == "short"),
+            "essay": sum(1 for q in saved["subjective"] if q.get("qtype") == "essay"),
+            "subjective": len(saved["subjective"]),
+        },
+        "report": report,
+        "usage": usage,
+    }
+
+
 @app.post("/api/daily/weak-paper")
 def daily_weak_paper(payload: dict):
     """按**薄弱点**组卷：优先考你命中率最低的考点。

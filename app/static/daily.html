@@ -83,8 +83,17 @@
     <div class="row">
       <button id="btnParse" onclick="doParse()">解析并定位考点</button>
       <button class="ghost" onclick="doWeakPaper()">按我的薄弱点出题（不用填记录）</button>
+      <button class="ghost" onclick="doAiSet()" id="btnAiSet"
+        title="全部由 AI 原创、刻意不用真题；最后一题论述题会带一段真实教育政策材料">
+        ✦ 全 AI 模拟组（20 单选 + 3 主观，不用真题）</button>
       <span class="muted" id="msg1"></span>
     </div>
+    <p class="muted" style="margin:6px 0 0;font-size:12.5px">
+      「全 AI 模拟组」= 按上面这段学习记录定主题，题目全部 AI 原创（<b>不抽真题</b>），
+      难度对标 311 真题、刻意避免识记题；最后一题论述题带材料，取材于
+      <code>source/教育热点.md</code> 里的真实政策热点。生成约需 1–3 分钟、会先做一次质量自检。
+    </p>
+    <div id="aiSetReport"></div>
     <div id="focusBox"></div>
   </section>
 
@@ -148,6 +157,67 @@ function showUsage(u, where) {
   if (!u) return;
   const est = (u.prompt_tokens||0)/1e6*1 + (u.completion_tokens||0)/1e6*4;
   $(where).textContent = `tokens ${u.prompt_tokens||0}/${u.completion_tokens||0} ≈ ${est.toFixed(4)} 元`;
+}
+
+// ---------- 全 AI 模拟组（刻意不用真题；论述题取材真实政策热点）
+async function doAiSet() {
+  const text = $('log').value.trim();
+  if (!text) { $('msg1').textContent = '先在上面写今天学了什么（这决定本组题的主题）'; return; }
+  $('btnAiSet').disabled = true;
+  $('aiSetReport').innerHTML = '';
+  $('msg1').textContent = '生成中：先定位考点 → 出 20 单选 + 3 主观 → 质量自检（约 1–3 分钟，请勿关页面）…';
+  try {
+    const r = await post('/api/daily/ai-set', { user_text: text });
+    if (!r.ok) { $('msg1').textContent = '失败：' + (r.error || '未知'); return; }
+    PAPER = r.paper;
+    renderPaper(r);
+    showUsage(r.usage, 'usage');
+    $('focusBox').innerHTML = `
+      <div class="card" style="background:#f3f7fb;border-left:3px solid var(--accent)">
+        <h4>本组主题（由你的学习记录定位）</h4>
+        ${(r.focus || []).map(f => `<div class="kp">${f.path}</div>`).join('')}
+      </div>`;
+    renderAiReport(r.report);
+    $('msg1').textContent = '';
+    goStep(3);
+  } catch (e) {
+    $('msg1').textContent = '出错：' + e;
+  } finally {
+    $('btnAiSet').disabled = false;
+  }
+}
+
+function renderAiReport(rep) {
+  if (!rep) return;
+  const okAll = rep.final_ok;
+  const cls = okAll ? 'var(--ok)' : '#b7791f';
+  const issueRows = (rep.program_issues || []).map(i =>
+    `<li>[${i.type}] ${i.target}：${i.detail}</li>`).join('');
+  const rounds = (rep.retry_history || []).map(h =>
+    `<li>第 ${h.attempt} 轮：AI 判定 pass=${h.ai_pass}、需重出=${h.ai_must_retry}，共 ${h.issue_n} 个问题
+      ${h.issues && h.issues.length ? '<div class="kp">' + h.issues.join('<br>') + '</div>' : ''}</li>`).join('');
+  $('aiSetReport').innerHTML = `
+    <div class="card" style="border-left:3px solid ${cls};margin-top:12px">
+      <h4>成组质量自检
+        <span class="tag" style="background:${okAll ? '#e8f5ec' : '#fdf3e7'};color:${cls}">
+          ${okAll ? '通过' : '仍有待改进项'}</span>
+        <span class="tag">重出 ${rep.attempts || 1} 轮</span>
+      </h4>
+      <div class="kp">
+        单选 ${rep.single_n} 道（答案分布 ${Object.entries(rep.answer_dist || {}).map(([k, v]) => k + ':' + v).join(' ')}
+        ｜最高占比 ${Math.round((rep.answer_top_share || 0) * 100)}%）
+        <br>认知层次：${Object.entries(rep.cognitive || {}).map(([k, v]) => k + ' ' + v).join(' · ')}
+        <br>主观题采分点：${(rep.points_per_subjective || []).join(' / ')} 个
+        ｜论述题带材料：${rep.essay_has_material ? '是' : '否'}
+        <br>论述题取材：${(rep.topics_used || []).map(t => t.title).join('；') || '（热点清单为空）'}
+      </div>
+      ${issueRows ? `<details><summary>程序层发现的问题（${(rep.program_issues || []).length} 项）</summary><ul>${issueRows}</ul></details>` : ''}
+      ${rounds ? `<details><summary>生成与重出记录</summary><ul>${rounds}</ul></details>` : ''}
+      ${rep.ai_check && rep.ai_check.comment ? `<div class="kp">AI 审核意见：${rep.ai_check.comment}</div>` : ''}
+      <div class="muted" style="font-size:12px;margin-top:6px">
+        这套题全部是 AI 原创、不是真题；难度与风格按 311 真题对标，但仍建议你自己判断质量。
+      </div>
+    </div>`;
 }
 
 // ---------- 按薄弱点出题（不需要输入学习记录）

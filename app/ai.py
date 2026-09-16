@@ -12,6 +12,7 @@
   - 所有返回强制 JSON（用 response_format），避免解析自由文本
 """
 import json
+import random
 import re
 import sqlite3
 import sys
@@ -253,7 +254,6 @@ def shuffle_options(q):
     为什么必须做：实测 AI 生成的单选题答案高度集中在某个字母（连出 3 道全 B），
     考生会看出规律。prompt 里要求「均衡分布」并不可靠，程序打乱才稳。
     """
-    import random
     opts = q.get("options") or {}
     keys = sorted(opts.keys())
     if len(keys) != 4:
@@ -284,9 +284,364 @@ def generate_questions(points, n_single=20, n_analysis=1, n_short=1, n_essay=1):
     return data, usage
 
 
+# ---------------------------------------------------------------- ②b 全 AI 模拟组
+
+HOT_TOPICS_PATH = ROOT / "source" / "教育热点.md"
+
+
+def hot_topics(limit=4):
+    """从 source/教育热点.md 取最近的若干条热点（供 AI 当论述题材料）。
+
+    为什么要走文件：模型有知识截止时间，无法知道"用户眼里的近期"。
+    文件由用户维护、只收官方来源，AI 只许引用其中的内容，不许自己编政策名/年份/文号。
+    优先取**没有 `[已用于出题]` 标记**、且日期较新的条目；`【本周重点】` 优先。
+    """
+    if not HOT_TOPICS_PATH.exists():
+        return []
+    txt = HOT_TOPICS_PATH.read_text(encoding="utf-8")
+    blocks = re.split(r"(?m)^##\s+", txt)[1:]
+    items = []
+    for b in blocks:
+        head = b.splitlines()[0].strip()
+        if not head or head.startswith("维护提示"):
+            continue
+        m = re.match(r"(\d{4}-\d{2}-\d{2})\s*[｜|]\s*(.+)", head)
+        date = m.group(1) if m else ""
+        title = (m.group(2) if m else head).strip()
+        used = "[已用于出题]" in b
+        star = "【本周重点】" in b
+        items.append({"date": date, "title": title, "used": used,
+                      "star": star, "body": b.strip()})
+    items.sort(key=lambda x: (x["star"], x["used"], x["date"]), reverse=True)
+    # 正文给足：截断会让 AI 看不到完整背景，可能在材料里"补"出原文没有的文号（误报为编造）
+    for it in items:
+        it["body"] = it["body"][:6000]
+    return items[:limit]
+
+
+AI_SET_SINGLE_SYS = """你是考研 311（教育学专业基础）统考的命题专家。本组题**全部由你原创**，
+不得使用任何历年真题原题，也不得照抄真题的题干与选项。
+
+【本次任务的硬性要求】
+1. **难度对标 311 真题的偏难区间**。命题方式必须像真题：
+   - **情境化**：先给一个具体情境（教学片段、课堂对话、学校做法、研究场景、政策文本片段、
+     学者观点、实验或调查描述），再问「这体现了/属于/说明/最适合用……解释」。
+   - **严禁纯识记题**：不许出「XX 的定义是」「XX 是谁提出的」「XX 发表于哪一年」这种
+     背了就会、没背就不会的题。至少要有**辨析、比较、应用、归因**这四类认知操作中的一种。
+   - **反面例子（这些写法实测就是识记题，一律不要）**：
+     ✗「裴斯泰洛齐的要素教育对课程与教学论的主要贡献在于」——四个选项各贴一个标签，记住标签就会做。
+     ✗「斯腾豪斯过程模式最突出的特点是」——人物—主张连线题。
+     ✗「泰勒目标模式的核心意图是」——背过"三个来源两道筛子"就能选。
+     ✓ 正确做法：给一段**真实的课堂/学校场景**（谁做了什么、出现了什么结果），
+       问「这主要体现了哪种取向 / 最可能的原因是什么 / 要改进应先调整哪一环」，
+       选项分别对应不同理论解释，**必须理解理论才能判断哪个更贴合情境**。
+   - **干扰项必须是真实的常见误解**：来自同一流派的其他观点、易混概念、常见的过度推广，
+     四个选项处于同一抽象层次，不能一眼排除，也不能出现「以上都对/都错」。
+   - **题干信息量足够**：一般 2–5 句；允许引用学者原话、数据、政策表述。
+   - **严禁与历年真题雷同**：不许直接照搬真题里出现过的原句（如「教师可以少教，学生可以多学」
+     「大自然希望儿童在成人以前就要像儿童的样子」这类被反复考的句子），
+     也不要复刻真题的设问方式；要换角度、换情境、换设问。
+2. **主题统一**：全部围绕用户给出的「今日学习内容」所覆盖的考点来出，不要跑到别的板块。
+   **识记题占比不得超过 20%（20 道里最多 4 道）**：教育史与教育思想史类主题难免涉及史实，
+   但绝大多数题目必须包装成情境判断，让"背过标签"不足以作答。
+3. 每题必须给出 `explain`（解析）：说清正确项为什么对、**至少两个干扰项为什么错**。
+   **绝对禁止在解析里写「A/B/C/D 项」「故选 B」这类字母引用** —— 因为出题后系统会重新打乱
+   选项顺序，字母会对不上（踩过：解析写「故 B 正确」而答案已变成 C）。
+   要指代选项时，用**它说的是什么**来表示，例如「把要素教育等同于要素主义的那一项」「主张教育即生活的那一项」。
+4. 每题标出它考的大纲考点 id（从给定清单里选）。
+5. 答案分布要均衡（A/B/C/D 各约 5 道，不要集中在某一字母）。
+6. 输出纯 JSON，不要解释文字、不要 markdown 代码块。
+
+输出格式：
+{"single": [
+  {"outline_id": 307, "stem": "题干（可含换行）",
+   "options": {"A": "…", "B": "…", "C": "…", "D": "…"},
+   "answer": "A", "explain": "解析：正确项之所以正确是因为……；把 X 与 Y 混为一谈的那一项错在……",
+   "cognitive": "应用", "difficulty": 4}
+]}
+其中 `cognitive` ∈ {理解, 应用, 分析, 评价}（**不允许填「识记」**），`difficulty` 为 1–5 的整数。
+"""
+
+AI_SET_SINGLE_USER = """今日学习内容（主题由它决定）：
+{study}
+
+可用的考点清单（id → 大纲路径，请为每题选一个）：
+{points}
+
+请出 **{n} 道单项选择题**，全部围绕上述考点，风格与难度对标 311 真题。
+"""
+
+AI_SET_SUBJ_SYS = """你是考研 311（教育学专业基础）统考的命题专家。本组题**全部由你原创**，
+不得使用任何历年真题原题。
+
+【本次任务的硬性要求】
+1. 三道主观题主题与单选题保持一致，且**难度对标 311 真题**：考要点组织、比较分析、综合运用，
+   不要出可以一句话答完的题。
+2. **辨析题(analysis, 15分)**：给一个**可判断正误且含陷阱**的命题
+   （半对半错、概念偷换、以偏概全、把两个层次混为一谈），不能是显而易见的对或错。
+3. **简答题(short, 15分)**：问"简述/比较/分析……"，答案是 3–5 个要点，不是填空。
+4. **分析论述题(essay, 30分)——这是本组最重要的一道，必须满足**：
+   - **必须包含材料**：把下面提供的**真实政策热点**作为材料（可摘引其表述，但不要整段照抄），
+     以「阅读下列材料，按要求回答问题」开头，材料后给出 2–3 个小问。
+   - **只许使用给定热点材料里的政策名称、年份、机构与提法**，**严禁自己编造**文件名、
+     文号、年份或数据。
+   - 小问要能落到大纲考点上（如教育与社会发展、课程改革、教师专业发展、教育评价等），
+     并体现"用教育学理论分析现实问题"的统考取向。
+5. 每道题拆 **4–6 个采分点**（claim 核心论断 + evidence 判分依据），按论点/维度拆，不要按句子拆。
+6. 输出纯 JSON，不要解释文字、不要 markdown 代码块。
+
+输出格式：
+{"subjective": [
+  {"outline_id": 307, "qtype": "analysis", "full_score": 15,
+   "stem": "题干（材料题用 \\n 分段，小问各占一行）",
+   "points": [{"seq": 1, "claim": "核心论断", "evidence": "判分依据"}],
+   "difficulty": 4}
+]}
+"""
+
+AI_SET_SUBJ_USER = """今日学习内容（主题由它决定）：
+{study}
+
+可用的考点清单（id → 大纲路径）：
+{points}
+
+【可用的真实热点材料 —— 论述题**只能**从这里取材，不许编造】
+{topics}
+
+请出 3 道主观题：1 道辨析题(analysis)、1 道简答题(short)、1 道分析论述题(essay, 带材料)。
+"""
+
+AI_SET_CHECK_SYS = """你是 311 命题质量审核员。用户会给你一组刚生成的模拟题（含单选与主观题）。
+请按下面标准逐条审核，**严格、不要放水**：
+
+1. 单选里有没有**纯识记题**（背定义/人名/年份就能答）？有就列出来。
+2. 有没有**一眼排除**的劣质干扰项、或「以上都对/都错」这类废选项？
+3. 答案分布是否严重集中在某一字母（超过一半）？
+4. 主观题：辨析题是否有真陷阱；简答题是否只是一句话能答完；**论述题是否真的带材料、
+   且材料是否来自给定的真实热点**（若材料里出现给定热点之外的"政策名称/年份/文号"，判定为编造）。
+5. 有没有和历年真题明显雷同的题（照抄题干或选项）？
+6. 有没有题干残缺、选项缺项、采分点少于 3 个的题？
+
+输出纯 JSON：
+{"pass": true/false,
+ "issues": [{"type": "识记题|劣质选项|答案集中|编造热点|疑似真题|残缺", "target": "第几题/题号", "detail": "问题描述"}],
+ "must_retry": true/false,
+ "comment": "一句话总评"}
+`must_retry` 只在**必须重出**时填 true（有识记题、编造热点、残缺、或答案严重集中）。
+"""
+
+
+def balance_answer_distribution(singles):
+    """把一批单选题的正确答案**均衡**铺到 A/B/C/D 上（就地修改）。
+
+    为什么不用"让 AI 自己均衡"或"答案集中就重出"：
+      - prompt 里要求均衡不可靠（实测同一批题里 B 占 8/20）；
+      - 随机分布下 4 选项的最大占比天然就有 ~37%，把它当"异常"会误判、白白重出。
+    做法（在 shuffle_options 打乱选项**之后**调用）：
+      把每题的正确选项摘出来，与其余选项按**尽量交替**的顺序重新拼回去，
+      并同步改写 answer —— 这样答案分布必然均衡（差值 ≤1），且不会出现全同一字母。
+    """
+    LETTERS = ["A", "B", "C", "D"]
+    n = len(singles)
+    if n < 4:
+        return singles
+    order = list(range(n))
+    random.shuffle(order)                      # 谁拿哪个字母也随机，避免"前几题总是 A"
+    # 正确项最多分到 ceil(n/4) 个
+    cap = (n + len(LETTERS) - 1) // len(LETTERS)
+    assign = []
+    for i, idx in enumerate(order):
+        assign.append(LETTERS[min(i // cap, len(LETTERS) - 1)])
+    for idx, correct_letter in zip(order, assign):
+        q = singles[idx]
+        opts = q.get("options") or {}
+        if len(opts) != 4:
+            continue
+        keys = sorted(opts.keys())
+        old_answer = (q.get("answer") or "").upper()
+        if old_answer not in opts:
+            continue
+        correct_text = opts[old_answer]
+        others = [opts[k] for k in keys if k != old_answer]
+        random.shuffle(others)
+        # 正确项放在目标位置，其余按顺序填入
+        target = keys.index(correct_letter)
+        new_vals = others[:target] + [correct_text] + others[target:]
+        q["options"] = dict(zip(keys, new_vals))
+        q["answer"] = correct_letter
+    return singles
+
+
+def audit_ai_set(paper):
+    """程序层硬校验（不依赖 AI 自评，这几项能确定性判定）。
+
+    为什么需要：AI 自评会漏、也会放水。下面三条都是实测踩到过的真问题：
+      ① 解析里引用选项字母（如「故 B 正确」）—— 打乱选项后字母必然对不上；
+      ② 答案集中在一个字母（实测 20 题里 B 占 8 道）；
+      ③ 主观题采分点过少（无法自评）。
+    """
+    issues = []
+    singles = paper.get("single", [])
+    subs = paper.get("subjective", [])
+
+    # ① 解析里的字母引用
+    letter_ref = re.compile(r"(?:故|选|答案(?:是|为|选)?|正确(?:项|答案)?(?:是|为)?)\s*[ABCD]\b"
+                            r"|[ABCD]\s*(?:项|选项)")
+    n_ref = sum(1 for q in singles if letter_ref.search(q.get("explain") or ""))
+    if n_ref:
+        issues.append({"type": "解析引用字母", "target": f"{n_ref} 道单选",
+                       "detail": "解析里写了选项字母，打乱选项后必然与答案矛盾"})
+
+    # ② 答案分布（已由 balance_answer_distribution 均衡；这里只做**兜底告警**）
+    #    阈值取 0.5 而不是 0.35：4 选项随机分布下最大占比天然就有 ~37%，
+    #    用 35% 判"集中"会把正常卷子误判成问题（踩过：程序与 AI 双方都误报，导致无限重出）。
+    from collections import Counter
+    dist = Counter((q.get("answer") or "").upper() for q in singles if q.get("answer"))
+    total = sum(dist.values())
+    if total:
+        top, cnt = dist.most_common(1)[0]
+        if cnt / total > 0.5:
+            issues.append({"type": "答案集中", "target": f"{top} 占 {cnt}/{total}",
+                           "detail": "答案过于集中，考生能靠规律蒙"})
+
+    # ③ 采分点数量
+    for i, q in enumerate(subs, 1):
+        if len(q.get("points") or []) < 3:
+            issues.append({"type": "采分点过少", "target": f"主观第 {i} 题",
+                           "detail": f"只有 {len(q.get('points') or [])} 个采分点，无法自评"})
+
+    # ④ 题干/选项残缺
+    for i, q in enumerate(singles, 1):
+        if len((q.get("stem") or "").strip()) < 15:
+            issues.append({"type": "题干过短", "target": f"单选第 {i} 题", "detail": "题干信息量不足"})
+        opts = q.get("options") or {}
+        if len(opts) != 4 or any(not str(v).strip() for v in opts.values()):
+            issues.append({"type": "选项残缺", "target": f"单选第 {i} 题", "detail": f"选项 {len(opts)} 个"})
+        if (q.get("answer") or "").upper() not in ("A", "B", "C", "D"):
+            issues.append({"type": "答案缺失", "target": f"单选第 {i} 题", "detail": str(q.get("answer"))})
+
+    # ⑤ 识记题比例：**不要求 0**。教育学史/思想史这类主题不可能完全避开史实，
+    #    硬要求 0 会让 AI 反复重出仍不达标（实测两轮都在 3–4 道）。改成"不超过三成"。
+    n_remember = sum(1 for q in singles if (q.get("cognitive") or "") in ("识记", "记忆"))
+    if singles and n_remember / len(singles) > 0.3:
+        issues.append({"type": "识记题偏多", "target": f"{n_remember}/{len(singles)} 道",
+                       "detail": "识记题超过三成，需要更多情境化/应用类题目"})
+
+    # ⑥ 组内重复：AI 实测会在同一批里出两道一模一样的题（只换了选项顺序）
+    def sig(q):
+        return re.sub(r"\s+", "", (q.get("stem") or ""))[:40]
+
+    seen, dups = {}, []
+    for i, q in enumerate(singles, 1):
+        s = sig(q)
+        if len(s) < 8:
+            continue
+        if s in seen:
+            dups.append(f"第{seen[s]}题与第{i}题")
+        else:
+            seen[s] = i
+    if dups:
+        issues.append({"type": "组内重复", "target": "、".join(dups[:3]),
+                       "detail": "同一批题里出现题干雷同的题，属于凑数"})
+
+    return {"issues": issues, "answer_dist": dict(dist), "remember_n": n_remember,
+            "hard_fail": bool([i for i in issues if i["type"] in (
+                "解析引用字母", "答案集中", "采分点过少", "题干过短", "选项残缺",
+                "答案缺失", "识记题偏多", "组内重复")])}
+
+
+def generate_ai_set(study_text, points, n_single=20, topics=None, max_attempts=2):
+    """一次生成「全 AI 模拟组」：{n_single} 单选 + 辨析/简答/论述各 1。
+
+    分两批调用（单选 / 主观）——合成一次调用在 20 题规模上容易截断，且失败看不出原因。
+    流程：生成 → 程序层硬校验 + AI 质检 → 不合格就**带着问题重出一组**（最多 max_attempts 次）。
+
+    返回 (paper, usage合计, 质检结果)；质检结果里含 attempts 与每一轮的 issues。
+    """
+    plist = "\n".join(f"{p['id']}\t{p.get('path') or p.get('name')}" for p in points)
+    topics = topics if topics is not None else hot_topics()
+    topics_txt = "\n\n".join(f"【热点 {i+1}】{t['date']} {t['title']}\n{t['body']}"
+                             for i, t in enumerate(topics)) or "（热点清单为空：请出一道经典的、不依赖时事的材料论述题）"
+    usage_total = {}
+
+    def add_usage(u):
+        for k in ("prompt_tokens", "completion_tokens"):
+            usage_total[k] = usage_total.get(k, 0) + (u or {}).get(k, 0)
+
+    history = []
+    paper, audit, check = None, None, None
+    for attempt in range(1, max_attempts + 1):
+        # 重出时把上一轮的问题甩回给 AI（比单纯"再来一次"有效）
+        feedback = ""
+        if history:
+            prev = history[-1]
+            lines = [f"- [{i['type']}] {i['target']}：{i['detail']}"
+                     for i in prev["issues"][:8]]
+            feedback = ("\n\n【上一轮生成被判定不合格，必须避免下列问题后重新命题】\n"
+                        + "\n".join(lines) + "\n请重新出一整套新题（不要只是改几个字）。")
+
+        user1 = AI_SET_SINGLE_USER.format(
+            study=(study_text or "（未填写，按考点清单覆盖的内容出题）") + feedback,
+            points=plist, n=n_single)
+        singles, u1 = chat_json(
+            [{"role": "system", "content": AI_SET_SINGLE_SYS}, {"role": "user", "content": user1}],
+            max_tokens=16000, temperature=0.7 + 0.1 * (attempt - 1))
+        add_usage(u1)
+
+        user2 = AI_SET_SUBJ_USER.format(
+            study=(study_text or "（未填写）") + feedback, points=plist, topics=topics_txt)
+        subs, u2 = chat_json(
+            [{"role": "system", "content": AI_SET_SUBJ_SYS}, {"role": "user", "content": user2}],
+            max_tokens=10000, temperature=0.7)
+        add_usage(u2)
+
+        paper = {"single": singles.get("single", [])[:n_single],   # 只要求 20 道，多给的一律裁掉
+                 "subjective": subs.get("subjective", [])}
+        for q in paper["single"]:
+            shuffle_options(q)
+        balance_answer_distribution(paper["single"])               # 打乱后再均衡答案分布
+
+        audit = audit_ai_set(paper)
+
+        check = {"pass": None, "issues": [], "must_retry": False, "comment": "（未跑 AI 质检）"}
+        try:
+            check_txt = json.dumps(paper, ensure_ascii=False)[:24000]
+            check, u3 = chat_json(
+                [{"role": "system", "content": AI_SET_CHECK_SYS},
+                 {"role": "user", "content": "热点清单：\n" + topics_txt[:4000] +
+                                             "\n\n待审题目：\n" + check_txt}],
+                max_tokens=2500, temperature=0.2)
+            add_usage(u3)
+        except Exception as e:
+            check = {"pass": None, "issues": [], "must_retry": False,
+                     "comment": f"质检调用失败：{type(e).__name__}: {e}"}
+
+        all_issues = audit["issues"] + list(check.get("issues") or [])
+        history.append({"attempt": attempt, "issues": all_issues,
+                        "answer_dist": audit["answer_dist"],
+                        "ai_pass": check.get("pass"), "ai_must_retry": check.get("must_retry")})
+
+        # 重出判定**以程序层硬校验为准**（确定性的那几项）。
+        # AI 审核意见只作为展示与提示 —— 否则它每轮都能挑出新毛病（实测两轮都要求重出），
+        # 重出到上限后反而交出一份"程序判定更差"的题。
+        need_retry = audit["hard_fail"]
+        if not need_retry:
+            break
+
+    return paper, usage_total, {
+        "attempts": len(history),
+        "history": history,
+        "program_audit": audit,
+        "ai_check": check,
+        "final_ok": not audit["hard_fail"],
+        "ai_flagged": bool((check or {}).get("must_retry")),
+    }
+
+
 # ---------------------------------------------------------------- ③ 批改
 
 _GRADE_SYS_CACHE = None
+
 
 
 def grade_system_prompt():
