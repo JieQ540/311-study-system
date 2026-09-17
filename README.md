@@ -31,8 +31,8 @@
 | --- | --- | --- |
 | **模拟考试** | `/` | 按 311 真实结构组卷（45 单选 + 3 辨析 + 5 简答 + 3 分析论述，含 30 分必选题），180 分钟计时，客观题自动判分；**交卷后可看每题答案与解析** |
 | **日常练习** | `/daily` | 两种入口：① 输入"今天学了什么"（自然语言）→ AI 定位考点 → 出题；② 一键**按薄弱点出题** |
-| **练习日志** | `/logs` | 每次练习的得分、采分点命中、以及**当时的薄弱点快照** |
-| **学习复盘** | `/reports` | 每次练习生成一份**基于数据**的 AI 学习报告（得分/失分考点/趋势/下一步），并画正确率趋势图 |
+| **练习日志** | `/logs` | **按天分组**；展开某一天可看到当天做过的每一道题——题干、你的作答、批改情况（客观题对错 + 主观题采分点逐点命中 / AI 批改），并可直接生成或跳转该次的 AI 复盘 |
+| **学习复盘** | `/reports` | 每次练习生成一份**基于数据**的 AI 学习报告（得分/失分考点/趋势/下一步），并画正确率趋势图；每条都能跳回练习日志看**这次到底做了哪些题** |
 | **薄弱点分析** | 各页入口 | 客观题对错 + 主观题采分点命中，按大纲考点聚合排序 |
 
 **行为细节**
@@ -275,12 +275,18 @@ SQLite 单文件（随包的 `data/kaoyan-seed.db` 或你自己的 `data/kaoyan.
 
 ### attempts / point_hits — 作答记录
 
-`attempts`：`question_id` / `date` / `mode` / `hits` / `total` / `cause` / `note`
+`attempts`：`question_id` / `date` / `mode` / `hits` / `total` / `cause` / `note` / `student_answer` / `grade` / `session_id`
 
-- 客观题：`hits=0/1`，`total=1`
-- 主观题：`hits=命中采分点数`，`total=该题采分点总数`
+- 客观题：`hits=0/1`，`total=1`，选中的选项字母存在 `note`
+- 主观题：`hits=命中采分点数`，`total=该题采分点总数`，`cause`=错因
+- 主观题的**作答原文**存在 `student_answer`、**AI 批改结果**（JSON：分数/总评/命中与漏掉/逐段批注）存在 `grade`
+  —— 练习日志要靠它们才能展开出"我的作答 / 批改情况"
+- `session_id` 指回 `sessions`；早期直接入库的作答该列为空，日志页会把它们归到"未归属记录"
 
 `point_hits`：`(attempt_id, point_id, hit)` —— 具体命中了哪些点。
+
+> `student_answer` / `grade` / `session_id` 三列都由 `server.py::ensure_schema()` 在启动时幂等补齐，
+> 老库不用手工迁移。
 
 ### sessions — 练习日志
 
@@ -312,9 +318,10 @@ SQLite 单文件（随包的 `data/kaoyan-seed.db` 或你自己的 `data/kaoyan.
 | --- | --- | --- |
 | GET | `/` `/daily` `/logs` `/reports` | 四个页面 |
 | GET | `/api/paper` | 取当前试卷（无 active 则新组一份） |
-| POST | `/api/save` | 提交作答：判分 + 写记录 + 写日志 |
+| POST | `/api/save` | 提交作答：判分 + 写记录 + 写日志（主观题可带 `answer_text` 作答原文与 AI 批改 `grade`） |
 | GET | `/api/weakness` | 薄弱点排名（客观题 + 主观题合并统计） |
-| GET | `/api/logs` | 练习日志列表 |
+| GET | `/api/logs` | 练习日志：**按天分组**（`days[]`，每天含各组练习、未归属作答、当天汇总） |
+| GET | `/api/logs/day/{date}` | 某一天的**题目级明细**：按练习分组，逐题给题干 / 我的作答 / 批改情况，并带 `report_id` 供跳转复盘 |
 | POST | `/api/review/generate` | 给某次练习生成 AI 复盘报告（可重复生成=覆盖） |
 | GET | `/api/reports` | 报告列表 + 总体趋势 |
 | DELETE | `/api/reports/{id}` | 删报告（不动作答与日志） |

@@ -89,7 +89,7 @@
 </div>
 
 <script>
-let PAPER = null, remain = 0, timerId = null;
+let PAPER = null, remain = 0, timerId = null, GRADES = {};
 
 const fmt = s => {
   s = Math.max(0, s|0);
@@ -226,10 +226,24 @@ function collectPaper() {
     const q = parseInt(s.dataset.cause);
     if (s.value) { map[q] = map[q] || []; map[q].cause = s.value; }
   });
+  // 作答原文与 AI 批改结果跟着一起提交：练习日志要展开显示"我写了什么、批得怎么样"。
+  // 一道题哪怕一个采分点都没勾，只要写了原文或批过，也算"做过的题"——
+  // 否则它在日志里根本不会出现（只勾采分点才入 map 的话就会漏）。
+  document.querySelectorAll('#subjectives textarea[id^="ans-"]').forEach(ta => {
+    const q = parseInt(ta.id.slice(4));
+    const v = (ta.value || '').trim();
+    if (v) { map[q] = map[q] || []; map[q].answer_text = v; }
+  });
+  Object.keys(GRADES).forEach(k => {
+    const q = parseInt(k);
+    if (GRADES[k]) { map[q] = map[q] || []; map[q].grade = GRADES[k]; }
+  });
   const subjective = Object.entries(map).map(([id, v]) => ({
     id: parseInt(id),
     hits: Array.isArray(v) ? v : [],
     cause: (v && v.cause) || null,
+    answer_text: (v && v.answer_text) || null,
+    grade: (v && v.grade) || null,
   }));
   return { single, subjective, ts: Date.now() };
 }
@@ -261,6 +275,11 @@ function restoreDraft() {
     if (x.cause) {
       const sel = document.querySelector(`select[data-cause="${x.id}"]`);
       if (sel) sel.value = x.cause;
+    }
+    // 作答原文此前不进草稿也不进库，刷新一次就白写了 —— 现在一并还原
+    if (x.answer_text) {
+      const ta = document.getElementById('ans-' + x.id);
+      if (ta) { ta.value = x.answer_text; n++; }
     }
   });
   return n;
@@ -415,6 +434,7 @@ async function aiGrade(qid, imageData) {
     const j = await r.json();
     if (!j.ok) { box.textContent = '失败: ' + j.error; return; }
     const d = j.result;
+    GRADES[qid] = d;   // 留到提交时一起入库，练习日志才能回看这次批改
     box.innerHTML = `
       ${d.recognized ? `<details open><summary>我识别到的手写内容（如有误请指出）</summary>
         <div class="card">${d.recognized}${d.recognize_note ? `<div class="kp">识别存疑：${d.recognize_note}</div>` : ''}</div></details>` : ''}

@@ -72,10 +72,17 @@ print()
 print("=" * 68)
 print("② /api/save 写练习日志 + 把作答挂到 session")
 print("=" * 68)
-# 副本库里的 20 条历史作答先留着（模拟用户真实数据）
+# 副本库里的历史作答**数量与状态都不固定** —— 用户自己练过就会有带 session 的新记录。
+# 所以只记录基线、断言"新增了多少 + 老的没被动"，不要写死数量（写死过一次，用户一练习测试就红）。
 con = sqlite3.connect(TEST_DB)
 old = con.execute("SELECT COUNT(*) FROM attempts").fetchone()[0]
+orphans_before = {r[0] for r in con.execute(
+    "SELECT id FROM attempts WHERE session_id IS NULL")}
+base_sessions = con.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+base_reports = con.execute("SELECT COUNT(*) FROM reports").fetchone()[0]
 con.close()
+print(f"  基线：{old} 条历史作答（未挂 session 的 {len(orphans_before)} 条）、"
+      f"{base_sessions} 条练习日志、{base_reports} 份报告")
 
 sids, subids = seed_attempts(6, 1)
 r1 = server.save({
@@ -90,10 +97,14 @@ check("save 返回 session_id", bool(sid1), f"session_id={sid1}")
 check("无 log_error", "log_error" not in r1["saved"], r1["saved"].get("log_error", ""))
 con = sqlite3.connect(TEST_DB)
 n_linked = con.execute("SELECT COUNT(*) FROM attempts WHERE session_id=?", (sid1,)).fetchone()[0]
-n_orphan = con.execute("SELECT COUNT(*) FROM attempts WHERE session_id IS NULL").fetchone()[0]
+orphans_after = {r[0] for r in con.execute(
+    "SELECT id FROM attempts WHERE session_id IS NULL")}
+total_after = con.execute("SELECT COUNT(*) FROM attempts").fetchone()[0]
 con.close()
 check("本次作答都挂到了 session", n_linked == 7, f"linked={n_linked}（6 客观 + 1 主观）")
-check("历史孤立作答没被误挂", n_orphan == old, f"orphan={n_orphan}，原历史={old}")
+check("历史孤立作答没被误挂", orphans_after == orphans_before,
+      f"孤立 {len(orphans_before)} → {len(orphans_after)}")
+check("本次只新增 7 条作答", total_after == old + 7, f"{old} → {total_after}")
 con = sqlite3.connect(TEST_DB)
 sentinels = con.execute(
     "SELECT COUNT(*) FROM attempts WHERE mode='_本次提交起点_'").fetchone()[0]
@@ -146,8 +157,9 @@ r2 = server.save({
 sid2 = r2["saved"].get("session_id")
 out2 = server.review_generate({"session_id": sid2})
 check("第二份报告生成成功", out2.get("ok") is True, str(out2)[:160])
-check("第二份报告能看到历史 1 次", len(CALLS["history"]) == 1,
-      f"history={len(CALLS['history'])}")
+# 历史条数取决于副本库原有 session 数（用户练过就有），所以按 baseline 相对断言
+check("第二份报告能看到全部历史", len(CALLS["history"]) == base_sessions + 1,
+      f"history={len(CALLS['history'])}（原有 {base_sessions} + 本次新建的 1 次）")
 check("第二份报告只有本次 2 条明细", len(CALLS["attempts"]) == 2,
       f"实际 {len(CALLS['attempts'])} 条")
 
@@ -156,10 +168,13 @@ print("=" * 68)
 print("⑤ GET /api/reports 列表 + 趋势")
 print("=" * 68)
 lst = server.reports_list()
-check("列表条数 = 练习次数", len(lst["items"]) == 2, f"items={len(lst['items'])}")
-check("已生成报告 2 份", lst["summary"]["reports"] == 2, str(lst["summary"]))
+expect_sessions = base_sessions + 2          # 原有 + 本测试新建 2 次
+check("列表条数 = 练习次数", len(lst["items"]) == expect_sessions,
+      f"items={len(lst['items'])}，期望 {expect_sessions}")
+check("本测试的 2 份报告都在", lst["summary"]["reports"] >= 2, str(lst["summary"]))
 check("待生成 0 份", lst["summary"]["pending"] == 0, str(lst["summary"]))
-check("趋势点 2 个", len(lst["trend"]) == 2, f"trend={len(lst['trend'])}")
+check("趋势点数 = 已有报告的练习数", len(lst["trend"]) == lst["summary"]["reports"],
+      f"trend={len(lst['trend'])} reports={lst['summary']['reports']}")
 check("趋势点带 objective_rate",
       all(t["objective_rate"] is not None for t in lst["trend"]),
       str([t["objective_rate"] for t in lst["trend"]]))
@@ -173,11 +188,11 @@ out3 = server.review_generate({})
 check("不给 session_id 也能生成（取最近一次）", out3.get("ok") is True, str(out3)[:160])
 check("生成的是最近那次练习", out3.get("session_id") == sid2,
       f"{out3.get('session_id')} vs {sid2}")
-check("同一 session 覆盖而不是重复插入",
-      server.rows("SELECT COUNT(*) c FROM reports")[0]["c"] == 2,
-      str(server.rows("SELECT COUNT(*) c FROM reports")[0]["c"]))
+n_rep = server.rows("SELECT COUNT(*) c FROM reports")[0]["c"]
+check("同一 session 覆盖而不是重复插入", n_rep == base_reports + 2,
+      f"reports={n_rep}，期望 原有 {base_reports} + 本测试 2")
 server.report_delete(out3["report_id"])
-check("删除生效", server.rows("SELECT COUNT(*) c FROM reports")[0]["c"] == 1)
+check("删除生效", server.rows("SELECT COUNT(*) c FROM reports")[0]["c"] == base_reports + 1)
 check("删报告不动作答记录",
       server.rows("SELECT COUNT(*) c FROM attempts")[0]["c"] == old + 9)
 

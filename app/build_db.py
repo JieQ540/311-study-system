@@ -64,7 +64,9 @@ CREATE TABLE IF NOT EXISTS attempts (
     hits        INTEGER,
     total       INTEGER,
     cause       TEXT,                 -- 不会/记混/看漏条件/时间不够
-    note        TEXT
+    note        TEXT,                 -- 客观题：选中的选项字母
+    student_answer TEXT,              -- 主观题：作答原文（练习日志要展示"我的作答"）
+    grade       TEXT                  -- 主观题：AI 批改结果 JSON
 );
 
 CREATE TABLE IF NOT EXISTS point_hits (

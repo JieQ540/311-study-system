@@ -56,6 +56,11 @@
   details.qans .explain { margin-top:6px; padding:10px 12px; background:#f7fafc;
     border-left:3px solid var(--accent); border-radius:4px; font-size:13.5px;
     white-space:pre-wrap; line-height:1.75; }
+  /* 辨析题的「判断正误」独立维度展示 */
+  .judge { margin:6px 0; padding:8px 12px; border-radius:4px; font-size:13.5px;
+           border-left:3px solid var(--muted); background:#fafafa; }
+  .judge.ok { border-left-color:#2f855a; background:#f0f9f3; }
+  .judge.bad { border-left-color:var(--bad); background:#fdf0f0; }
 </style>
 </head>
 <body>
@@ -134,7 +139,7 @@
 </main>
 
 <script>
-let MATCHES = [], PAPER = null, SUBJECTIVE_IDS = [], SESSION_ID = null;
+let MATCHES = [], PAPER = null, SUBJECTIVE_IDS = [], SESSION_ID = null, GRADES = {};
 
 const $ = id => document.getElementById(id);
 
@@ -458,11 +463,21 @@ async function aiGrade(qid, imageData) {
     const r = await post('/api/daily/grade', body);
     if (!r.ok) { box.textContent = '失败: ' + r.error; return; }
     const d = r.result;
+    GRADES[qid] = d;   // 留到提交时一起入库，练习日志才能回看这次批改
     showUsage(r.usage, 'usage');
     box.innerHTML = `
       ${d.recognized ? `<details open><summary>我识别到的手写内容（如有误请指出）</summary>
         <div class="card">${d.recognized}${d.recognize_note ? `<div class="kp">识别存疑：${d.recognize_note}</div>` : ''}</div></details>` : ''}
       <div class="score">${d.score} / ${d.full_score}</div>
+      ${d.judgment ? `
+        <div class="judge ${d.judgment.matched ? 'ok' : 'bad'}">
+          <b>① 判断正误（3 分，独立维度）</b>：
+          你判「${d.judgment.student || '（未作判断）'}」／正确应为「${d.judgment.correct || '?'}」
+          → <b>${d.judgment.matched ? '判断正确' : '判断错误或未判断'}</b>
+          ${d.judgment.note ? `<div class="kp">${d.judgment.note}</div>` : ''}
+        </div>` : ''}
+      ${r.score_cap_note ? `<div class="judge bad"><b>已按官方规则封顶</b>：${r.score_cap_note}
+        <div class="kp">辨析题必须先给出明确判断；判断错或没判断，理由写得再好也不超过 3 分。</div></div>` : ''}
       <p><b>一句话总评：</b>${d.one_line || ''}</p>
       <p><b>命中采分点：</b>${(d.hit_seqs||[]).join('、') || '无'} ｜
          <b>漏掉：</b>${(d.miss_seqs||[]).join('、') || '无'} ｜
@@ -497,7 +512,23 @@ async function submitAll() {
     const q = parseInt(i.dataset.q);
     (map[q] = map[q] || []).push(parseInt(i.value));
   });
-  const subjective = Object.entries(map).map(([id, hits]) => ({ id: parseInt(id), hits }));
+  // 作答原文与 AI 批改结果一起提交（练习日志要展开显示"我写了什么、批得怎么样"）。
+  // 没勾采分点但写了原文/批过的题也算"做过的题"，否则它在日志里不会出现。
+  document.querySelectorAll('#paper textarea[id^="ans-"]').forEach(ta => {
+    const q = parseInt(ta.id.slice(4));
+    const v = (ta.value || '').trim();
+    if (v) { map[q] = map[q] || []; map[q].answer_text = v; }
+  });
+  Object.keys(GRADES).forEach(k => {
+    const q = parseInt(k);
+    if (GRADES[k]) { map[q] = map[q] || []; map[q].grade = GRADES[k]; }
+  });
+  const subjective = Object.entries(map).map(([id, v]) => ({
+    id: parseInt(id),
+    hits: Array.isArray(v) ? v : [],
+    answer_text: (v && v.answer_text) || null,
+    grade: (v && v.grade) || null,
+  }));
 
   $('btnSubmit').disabled = true;
   $('msg3').textContent = '保存中…';

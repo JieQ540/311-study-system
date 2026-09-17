@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>311 练习日志</title>
 <style>
-  :root { --line:#e3e3e3; --ink:#222; --muted:#777; --accent:#2b6cb0; --bad:#c53030; --ok:#2f855a; --bg:#fafafa; }
+  :root { --line:#e3e3e3; --ink:#222; --muted:#777; --accent:#2b6cb0; --bad:#c53030;
+          --ok:#2f855a; --bg:#fafafa; }
   * { box-sizing:border-box; }
   body { margin:0; font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
          color:var(--ink); background:var(--bg); line-height:1.7; }
@@ -16,18 +17,67 @@
   main { max-width:900px; margin:0 auto; padding:18px; }
   .sum { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 18px; margin-bottom:16px; }
   .sum b { font-size:20px; }
+  .sum .kpi { display:flex; gap:26px; flex-wrap:wrap; margin-top:6px; }
+  .sum .kpi div { font-size:13px; color:var(--muted); }
+  .sum .kpi b { display:block; font-size:20px; color:var(--ink); }
   .item { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 18px; margin-bottom:12px; }
   .item h3 { margin:0 0 6px; font-size:15px; }
   .item .tags { font-size:13px; color:var(--muted); margin-bottom:8px; }
   .tag { display:inline-block; font-size:12px; padding:1px 8px; border-radius:10px;
          background:#eef3f8; color:var(--accent); margin-right:6px; }
   .tag.sim { background:#fdf3e7; color:#b7791f; }
+  .tag.ok { background:#e8f5ec; color:var(--ok); }
+  .tag.bad { background:#fdecec; color:var(--bad); }
+  .tag.pending { background:#f5f5f5; color:#666; }
   .score { font-size:18px; font-weight:700; color:var(--accent); }
   table { width:100%; border-collapse:collapse; font-size:13px; margin-top:6px; }
   td, th { border-bottom:1px solid #f0f0f0; padding:3px 6px; text-align:left; }
   .rate-bad { color:var(--bad); font-weight:700; }
   details summary { cursor:pointer; font-size:13px; color:var(--accent); }
   .empty { color:var(--muted); text-align:center; padding:40px; }
+  .muted { color:var(--muted); font-size:13px; }
+
+  /* ===== 展开后的题目明细 ===== */
+  details.qbox { margin-top:10px; border-top:1px dashed var(--line); padding-top:8px; }
+  details.qbox > summary { font-size:14px; font-weight:600; }
+  .qbody { margin-top:10px; }
+  .group { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:12px;
+           background:#fcfcfd; }
+  .ghead { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+           border-bottom:1px solid var(--line); padding-bottom:8px; margin-bottom:8px; }
+  .ghead .grow { flex:1; }
+  .q { border-left:3px solid #cbd5e0; padding:8px 0 8px 10px; margin:10px 0; }
+  .q.right { border-left-color:#9ae6b4; }
+  .q.wrong { border-left-color:#feb2b2; }
+  .q.missing { border-left-color:#ecc94b; background:#fffbea; padding-right:8px; border-radius:0 6px 6px 0; }
+  .qhead { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px; margin-bottom:4px; }
+  .qno { font-weight:600; }
+  .stem { font-size:14px; margin:4px 0 6px; white-space:pre-wrap; }
+  .opt { font-size:13px; padding:1px 6px; border-radius:4px; color:#444; }
+  .opt.right { background:#e8f5ec; color:var(--ok); font-weight:600; }
+  .opt.picked { background:#eef3f8; }
+  .opt.picked.right { background:#e8f5ec; }
+  .mine { font-size:13px; margin-top:6px; }
+  .mine .lbl { color:var(--muted); }
+  .ans { background:#fff; border:1px solid var(--line); border-radius:6px; padding:6px 10px;
+         margin-top:3px; white-space:pre-wrap; font-size:13px; }
+  .verdict { font-size:13px; margin-top:4px; }
+  .bad { color:var(--bad); font-weight:600; }
+  .good { color:var(--ok); font-weight:600; }
+  .grade { background:#f7fafc; border:1px solid var(--line); border-radius:6px;
+           padding:8px 12px; margin-top:6px; font-size:13px; }
+  details.pts, details.src { margin-top:6px; }
+  .pt { padding:3px 0; font-size:13px; }
+  .pt.hit { color:var(--ok); }
+  .pt .mark { font-size:12px; margin-left:4px; }
+  .ev { color:var(--muted); font-size:12px; }
+  .btn { font-size:13px; padding:4px 12px; border-radius:6px; border:1px solid var(--accent);
+         background:var(--accent); color:#fff; cursor:pointer; text-decoration:none;
+         display:inline-block; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .btn.ghost { background:#fff; color:var(--accent); }
+  .btn.mini { font-size:12px; padding:3px 10px; }
+  .hl { outline:2px solid #ecc94b; outline-offset:2px; }
 </style>
 </head>
 <body>
@@ -37,59 +87,287 @@
   <a href="/daily">← 日常练习</a>
   <a href="/reports">学习复盘</a>
   <div style="flex:1"></div>
-  <span class="muted" id="meta" style="font-size:13px;color:#777"></span>
+  <span class="muted" id="meta"></span>
 </header>
 <main>
   <div class="sum" id="sum"></div>
   <div id="list"></div>
 </main>
 <script>
+const $ = id => document.getElementById(id);
+// 题干/作答/批改文本全部来自题库或 AI，一律转义后再拼进 HTML（曾经裸拼，题干里的 < 会吃掉标签）
+const esc = s => (s === null || s === undefined ? '' : String(s))
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// 从复盘页跳过来：/logs?date=2026-09-16&sid=1
+const QS = new URLSearchParams(location.search);
+const FOCUS_DATE = QS.get('date');
+const FOCUS_SID = QS.get('sid');
+
+function pct(a, b) { return b ? Math.round(a / b * 100) + '%' : '—'; }
+
+// ============================== 列表（按天） ==============================
 async function boot() {
-  const r = await fetch('/api/logs?limit=100');
-  const j = await r.json();
-  const items = j.items || [];
-  if (!items.length) {
-    document.getElementById('sum').style.display = 'none';
-    document.getElementById('list').innerHTML =
-      '<div class="empty">还没有记录。<br>去做一次模拟或日常练习，提交后这里就会出现。</div>';
+  const j = await (await fetch('/api/logs?limit=200')).json();
+  const days = j.days || [], s = j.summary || {};
+  if (!days.length) {
+    $('sum').style.display = 'none';
+    $('list').innerHTML = '<div class="empty">还没有记录。<br>去做一次模拟或日常练习，提交后这里就会出现。</div>';
     return;
   }
-  const totalQ = items.reduce((a, x) => a + (x.objective_total || 0), 0);
-  const totalR = items.reduce((a, x) => a + (x.objective_right || 0), 0);
-  const totalScore = items.reduce((a, x) => a + (x.objective_score || 0), 0);
-  document.getElementById('meta').textContent = `共 ${items.length} 次记录`;
-  document.getElementById('sum').innerHTML =
-    `<div>练习次数 <b>${items.length}</b> ｜ 累计客观题 <b>${totalQ}</b> 道 ｜
-      答对 <b>${totalR}</b> 道（${totalQ ? Math.round(totalR/totalQ*100) : 0}%）｜
-      累计得分 <b>${totalScore}</b> / ${totalQ * 2}</div>`;
+  $('sum').style.display = 'block';
+  $('meta').textContent = `共 ${s.days} 天 ｜ ${s.sessions} 次练习`;
+  $('sum').innerHTML = `
+    <div style="font-size:14px;font-weight:600">总览</div>
+    <div class="kpi">
+      <div>练习天数<b>${s.days || 0}</b></div>
+      <div>练习次数<b>${s.sessions || 0}</b></div>
+      <div>已复盘<b>${s.reports || 0}</b></div>
+      <div>待复盘<b>${s.pending || 0}</b></div>
+      <div>累计题目<b>${s.attempts || 0}</b></div>
+      <div>客观题累计<b>${s.objective_score || 0}</b> 分</div>
+    </div>
+    <div style="font-size:13px;color:#777;margin-top:8px">
+      展开某一天，能看到当天做过的每一道题：题干要求、你的作答、批改情况，并可直接生成或查看这一次的 AI 复盘。
+    </div>`;
 
-  document.getElementById('list').innerHTML = items.map((it, idx) => {
-    const snap = it.weak_snapshot || [];
-    const pct = it.objective_total ? Math.round(it.objective_right / it.objective_total * 100) : 0;
+  $('list').innerHTML = days.map((d, idx) => {
+    const t = d.totals || {};
     return `
     <div class="item">
-      <h3>#${items.length - idx} ${it.date}
-        <span class="tag ${it.mode && it.mode.includes('模拟') ? 'sim' : ''}">${it.mode || '未标注'}</span></h3>
+      <h3>#${days.length - idx} ${esc(d.date)}
+        <span class="tag ${d.sessions_n ? '' : 'pending'}">${d.sessions_n} 组练习</span>
+        ${t.reports ? `<span class="tag ok">已复盘 ${t.reports}</span>` : ''}
+        ${d.loose_attempts ? `<span class="tag pending">另有 ${d.loose_attempts} 道早期记录</span>` : ''}
+      </h3>
       <div class="tags">
-        客观题 <span class="score">${it.objective_score ?? 0}</span> / ${(it.objective_total || 0) * 2} 分
-        （对 ${it.objective_right || 0}/${it.objective_total || 0}，${pct}%）
-        ｜ 主观自评 ${it.subjective_count || 0} 题
-        ｜ 采分点命中 ${it.point_hits || 0}/${it.point_total || 0}
-        ${it.note ? '｜ ' + it.note : ''}
+        客观题 <span class="score">${t.objective_score || 0}</span> / ${(t.objective_total || 0) * 2} 分
+        （对 ${t.objective_right || 0}/${t.objective_total || 0}，${pct(t.objective_right || 0, t.objective_total || 0)}）
+        ｜ 主观自评 ${t.subjective_count || 0} 题
+        ${t.point_total ? `｜ 采分点命中 ${t.point_hits || 0}/${t.point_total}` : ''}
+        ｜ 共 ${d.attempts_n || 0} 道题
       </div>
-      ${snap.length ? `
-      <details>
-        <summary>当时的薄弱点快照（前 ${snap.length} 个）</summary>
-        <table>
-          <tr><th>考点</th><th>命中/总</th><th>命中率</th></tr>
-          ${snap.map(x => `<tr><td title="${x.path}">${x.name}</td>
-            <td>${x.hit}/${x.total}</td>
-            <td class="${x.rate < 0.6 ? 'rate-bad' : ''}">${Math.round(x.rate * 100)}%</td></tr>`).join('')}
-        </table>
-      </details>` : ''}
+      <details class="qbox" data-date="${esc(d.date)}">
+        <summary>展开当天做过的题（${d.attempts_n || 0} 道）</summary>
+        <div class="qbody"><div class="muted" style="padding:10px 0">点开即加载…</div></div>
+      </details>
     </div>`;
   }).join('');
+
+  document.querySelectorAll('details.qbox').forEach(box => {
+    box.addEventListener('toggle', () => {
+      if (box.open) loadDay(box.dataset.date, box.querySelector('.qbody'));
+    });
+  });
+
+  // 从复盘页跳过来：自动展开那一天、并高亮那一次练习
+  if (FOCUS_DATE) {
+    const box = document.querySelector(`details.qbox[data-date="${FOCUS_DATE}"]`);
+    if (box) {
+      box.open = true;
+      box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
 }
+
+// ============================== 某一天的明细 ==============================
+async function loadDay(date, body) {
+  if (!body) return;
+  body.innerHTML = '<div class="muted" style="padding:10px 0">加载中…</div>';
+  let j;
+  try {
+    j = await (await fetch('/api/logs/day/' + encodeURIComponent(date))).json();
+  } catch (e) {
+    body.innerHTML = `<div class="muted">加载失败：${esc(e)}</div>`;
+    return;
+  }
+  const groups = j.groups || [];
+  if (!groups.length) {
+    body.innerHTML = '<div class="muted" style="padding:10px 0">这一天没有作答记录。</div>';
+    return;
+  }
+  body.innerHTML = groups.map(g => renderGroup(g, date)).join('')
+    + (j.missing_n ? `<div class="muted">注：其中有 ${j.missing_n} 道题已不在题库里（题库重建过），
+        只保留了作答记录。</div>` : '');
+
+  // 高亮复盘页指向的那一次练习
+  if (FOCUS_SID) {
+    const el = document.getElementById('g-' + FOCUS_SID);
+    if (el) { el.classList.add('hl'); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  }
+}
+
+function renderGroup(g, date) {
+  const s = g.summary || {};
+  const title = g.loose ? '未归属记录' : (g.mode || '未标注');
+  return `
+  <div class="group" id="g-${g.session_id ?? 'loose'}">
+    <div class="ghead">
+      <span class="tag ${title.includes('模拟') ? 'sim' : ''}">${esc(title)}</span>
+      <span class="muted">
+        ${s.objective_total ? `客观 ${s.objective_score}/${s.objective_total * 2} 分（对 ${s.objective_right}/${s.objective_total}）` : ''}
+        ${s.subjective_count ? `｜ 主观 ${s.subjective_count} 题` : ''}
+        ${s.point_total ? `｜ 采分点命中 ${s.point_hits}/${s.point_total}` : ''}
+        ｜ 共 ${(g.questions || []).length} 道题
+        ${g.created_at ? `｜ 提交于 ${esc((g.created_at || '').replace('T', ' '))}` : ''}
+      </span>
+      <span class="grow"></span>
+      ${reportRow(g)}
+    </div>
+    ${g.note ? `<div class="muted" style="margin-bottom:6px">备注：${esc(g.note)}</div>` : ''}
+    ${(g.questions || []).map(renderQuestion).join('')}
+  </div>`;
+}
+
+// 与「学习复盘」板块的联动入口：已生成 → 去看；没生成 → 就地生成
+function reportRow(g) {
+  if (g.loose) {
+    return '<span class="muted">早期直接入库的作答，没有对应的练习记录</span>';
+  }
+  if (g.report_id) {
+    return `<a class="btn ghost mini" href="/reports#rep-${g.report_id}">查看复盘报告</a>
+            <button class="btn ghost mini" onclick="genReview(${g.session_id}, this)">重新生成</button>`;
+  }
+  return `<button class="btn mini" onclick="genReview(${g.session_id}, this)">生成 AI 复盘</button>
+          <span class="muted">基于这次作答 + 历史记录</span>`;
+}
+
+async function genReview(sid, btn) {
+  if (!sid) return;
+  btn.disabled = true;
+  btn.textContent = 'AI 分析中…（约 10-20 秒）';
+  try {
+    const r = await fetch('/api/review/generate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sid })
+    });
+    const j = await r.json();
+    if (!j.ok) {
+      alert('生成失败：' + (j.error || '未知错误'));
+      btn.disabled = false; btn.textContent = '生成 AI 复盘';
+      return;
+    }
+    // 重新渲染列表，展开过的天照旧展开，并跳到刚生成的报告
+    location.href = '/reports#rep-' + j.report_id;
+  } catch (e) {
+    alert('出错：' + e);
+    btn.disabled = false; btn.textContent = '生成 AI 复盘';
+  }
+}
+
+// ============================== 单题渲染 ==============================
+function renderQuestion(q) {
+  if (q.missing) {
+    return `<div class="q missing">
+      <div class="qhead"><span class="tag bad">题目已不在题库</span>
+        <span class="muted">题库里已找不到这道题（id=${q.question_id}）｜作答记录仍然保留</span></div>
+      ${q.my_answer ? `<div class="mine"><span class="lbl">我的作答：</span><b>${esc(q.my_answer)}</b></div>` : ''}
+    </div>`;
+  }
+  return q.qtype === 'single' ? renderSingle(q) : renderSubjective(q);
+}
+
+function qheadHtml(q) {
+  const right = q.is_right === true ? 'right' : (q.is_right === false ? 'wrong' : '');
+  const verdict = q.is_right === true
+    ? `<span class="tag ok">✔ 答对 ${q.score}/${q.full_score}</span>`
+    : (q.is_right === false ? `<span class="tag bad">✘ 答错 ${q.score}/${q.full_score}</span>` : '');
+  return { cls: right, html: `
+    <div class="qhead">
+      <span class="tag">${esc(q.qtype_label)}</span>
+      ${q.number ? `<span class="qno">第 ${esc(q.number)} 题</span>` : ''}
+      ${q.year ? `<span class="tag">${q.year} 真题</span>` : ''}
+      ${q.source && q.source.includes('AI') ? '<span class="tag sim">AI 生成</span>' : ''}
+      ${verdict}
+      ${q.outline_name ? `<span class="muted">考点：${esc(q.outline_name)}</span>` : ''}
+    </div>` };
+}
+
+function renderSingle(q) {
+  const opts = q.options || {};
+  const optHtml = Object.keys(opts).sort().map(k => {
+    const cls = [k === q.correct_answer ? 'right' : '', k === q.my_answer ? 'picked' : '']
+      .filter(Boolean).join(' ');
+    return `<div class="opt ${cls}"><b>${esc(k)}.</b> ${esc(opts[k])}</div>`;
+  }).join('');
+  const h = qheadHtml(q);
+  return `<div class="q ${h.cls}">
+    ${h.html}
+    <div class="stem">${esc(q.stem)}</div>
+    ${optHtml}
+    <div class="mine">
+      <span class="lbl">我的作答：</span>
+      ${q.my_answer
+        ? `<b>${esc(q.my_answer)}</b>${q.is_right === false ? ' <span class="bad">（错）</span>' : ''}`
+        : '<span class="muted">（未作答）</span>'}
+      <span class="lbl">｜ 正确答案：</span><b class="good">${esc(q.correct_answer || '—')}</b>
+    </div>
+    ${q.explain ? `<details class="src"><summary>解析</summary>
+        <div class="ans">${esc(q.explain)}</div></details>` : ''}
+  </div>`;
+}
+
+function renderSubjective(q) {
+  const pts = q.points || [];
+  const hitN = pts.filter(p => p.hit).length;
+  const h = qheadHtml(q);
+  return `<div class="q">
+    ${h.html}
+    <div class="stem">${esc(q.stem)}</div>
+    <div class="mine">
+      <span class="lbl">我的作答：</span>
+      ${q.my_answer
+        ? `<div class="ans">${esc(q.my_answer)}</div>`
+        : `<span class="muted">（这次没有留下作答原文${q.hits !== null && q.hits !== undefined ? `，只记了自评命中 ${q.hits}/${q.total} 个采分点` : ''}；
+            从下次练习起会连原文一起保存）</span>`}
+    </div>
+    <div class="verdict">
+      <span class="lbl">自评：</span>命中 ${hitN}/${pts.length} 个采分点
+      ${q.cause ? `｜ 错因：<b>${esc(q.cause)}</b>` : ''}
+    </div>
+    ${gradeHtml(q.grade, q)}
+    ${pointsHtml(pts)}
+    ${q.reference ? `<details class="src"><summary>参考答案（做完再对照）</summary>
+        <div class="ans">${esc(q.reference)}</div></details>` : ''}
+  </div>`;
+}
+
+function gradeHtml(g, q) {
+  if (!g) return '';
+  const full = g.full_score ?? q.full_score ?? '—';
+  const j = g.judgment || {};
+  return `<div class="grade">
+    <div><span class="tag ok">AI 批改 ${g.score ?? '?'} / ${esc(full)} 分</span>
+      ${g.one_line ? esc(g.one_line) : ''}</div>
+    <div class="muted" style="margin-top:4px">
+      命中采分点 ${(g.hit_seqs || []).join('、') || '无'} ｜ 漏掉 ${(g.miss_seqs || []).join('、') || '无'}
+      ${g.cause ? `｜ 错因：${esc(g.cause)}` : ''}
+    </div>
+    ${j.matched === false || j.explicit === false
+      ? `<div class="muted" style="color:#c53030">辨析题判断有问题（${esc(j.student || '未作判断')} → 应为「${esc(j.correct || '?')}」），按官方规则不超过 3 分</div>` : ''}
+    ${g.recognized ? `<details><summary>识别到的手写内容</summary>
+        <div class="ans">${esc(g.recognized)}</div></details>` : ''}
+    ${(g.per_paragraph || []).length ? `<details><summary>逐段批注（${g.per_paragraph.length} 段）</summary>
+        ${g.per_paragraph.map(p => `<div class="pt"><div>${esc(p.text)}</div>
+          <div class="ev">${esc(p.mark || '')} ${esc(p.comment || '')}</div></div>`).join('')}
+      </details>` : ''}
+    ${g.optimized ? `<details><summary>优化版作答</summary>
+        <div class="ans">${esc(g.optimized)}</div></details>` : ''}
+  </div>`;
+}
+
+function pointsHtml(pts) {
+  if (!pts.length) return '';
+  const hitN = pts.filter(p => p.hit).length;
+  return `<details class="pts"><summary>采分点逐点判定（命中 ${hitN}/${pts.length}）</summary>
+    ${pts.map(p => `<div class="pt ${p.hit ? 'hit' : ''}">
+      <b>${p.seq}.</b> ${esc(p.claim)}
+      <span class="mark">${p.hit ? '✔ 已答到' : '✘ 未答到'}</span>
+      ${p.evidence ? `<div class="ev">判分依据：${esc(p.evidence)}</div>` : ''}
+    </div>`).join('')}
+  </details>`;
+}
+
 boot();
 </script>
 </body>

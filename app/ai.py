@@ -183,13 +183,17 @@ GEN_SYS = """你是考研 311 教育学专业基础的命题专家，严格依�
 
 【题型规范】
 - 单选题：4 个选项，只有一个最符合要求；不要「以上都对」这类废选项。
-- 辨析题(analysis, 15分)：给一个**可判断正误且含陷阱**的命题（常见型式：半对半错、
-  概念偷换、以偏概全）。
+- 辨析题(analysis, 15分)：给一个**可判断正误且含陷阱**的命题（常见型式：
+  表述看似一半合理、实则错误；概念偷换；以偏概全）。
+  ⚠️ 「半对半错」说的是**命题手法**（引学生上钩），**不是答案**：
+  这类命题的正确结论是「错误」或「片面」，学生必须给出**单一**判断。
 - 简答题(short, 15分)：考要点组织，不是填空。
 - 分析论述题(essay, 30分)：可含材料或多小问，考综合运用。
 
 【其他】
 - 每道题都要给出采分点（claim 核心论断 + evidence 判分依据），主观题 4-6 个。
+  **辨析题的第 1 个采分点必须是「判断正误」**（写「该说法错误：……」或「该说法正确：……」）——
+  官方判分是两层：判断正误 3 分（判断错则全题不超过 3 分）+ 阐明理由 12 分。
 - 严禁照抄历年真题原题；可参考风格，但必须改变情境与设问。
 - 输出纯 JSON，不要解释文字。
 """
@@ -388,6 +392,11 @@ AI_SET_SUBJ_SYS = """你是考研 311（教育学专业基础）统考的命题�
    - 小问要能落到大纲考点上（如教育与社会发展、课程改革、教师专业发展、教育评价等），
      并体现"用教育学理论分析现实问题"的统考取向。
 5. 每道题拆 **4–6 个采分点**（claim 核心论断 + evidence 判分依据），按论点/维度拆，不要按句子拆。
+   **辨析题的第 1 个采分点必须是「判断正误」**：明确写「该说法错误：……」或「该说法正确：……」。
+   为什么必须单列：官方判分是两层 —— 判断正误（3 分，判断错则全题不超过 3 分）+ 阐明理由（12 分），
+   判断项混在理由里学生就无法自评这一维。
+   **判断只能是"错误"或"正确"二者之一**，不许写成"半对半错/有对有错"——
+   命题可以"看似半对"来设陷阱，但结论必须落到一个方向（这类命题的正确判断通常是"错误"或"片面"）。
 6. 输出纯 JSON，不要解释文字、不要 markdown 代码块。
 
 输出格式：
@@ -544,10 +553,24 @@ def audit_ai_set(paper):
         issues.append({"type": "组内重复", "target": "、".join(dups[:3]),
                        "detail": "同一批题里出现题干雷同的题，属于凑数"})
 
+    # ⑦ 辨析题必须有「判断」采分点：官方判分是两层（判断正误 3 分 + 阐明理由 12 分），
+    #    首个采分点不是判断，就等于丢了这一维，学生自评时也无从勾选。
+    JUDGE_KW = ("错误", "正确", "片面", "不完全", "不准确", "有失", "偏颇", "不成立")
+    for i, q in enumerate(subs, 1):
+        if q.get("qtype") != "analysis":
+            continue
+        pts = q.get("points") or []
+        if not pts:
+            continue
+        first = str(pts[0].get("claim") or "")
+        if not any(k in first for k in JUDGE_KW):
+            issues.append({"type": "辨析题缺判断项", "target": f"主观第 {i} 题",
+                           "detail": f"首个采分点不是「判断正误」：{first[:24]}"})
+
     return {"issues": issues, "answer_dist": dict(dist), "remember_n": n_remember,
             "hard_fail": bool([i for i in issues if i["type"] in (
                 "解析引用字母", "答案集中", "采分点过少", "题干过短", "选项残缺",
-                "答案缺失", "识记题偏多", "组内重复")])}
+                "答案缺失", "识记题偏多", "组内重复", "辨析题缺判断项")])}
 
 
 def generate_ai_set(study_text, points, n_single=20, topics=None, max_attempts=2):
@@ -658,10 +681,19 @@ GRADE_EXTRA = """
 1. 除了按采分点给分外，还要单独判断「**言之有理加分项**」：
    学生答案中若有采分点之外、但符合大纲与教材、且论述成立的合理内容，
    列入 extra_credit 字段，**不并入命中采分点**，也不计入命中率。
-2. 输出必须是纯 JSON，字段如下（不要 markdown 代码块）：
+2. **辨析题必须单独判「判断」这一维**（这是官方要求的独立得分点，别混在理由里）：
+   - 学生答案里**有没有明确给出**「该说法错误 / 该说法正确」这样的判断？
+   - 若有，他判的方向对不对（对照采分点第 1 条给的正确判断）？
+   - **判断是二元的**：只允许"错误"或"正确"，不许出现"半对半错/有对有错"这类模糊判断；
+     学生若写"有合理之处也有局限"而没落到一个结论上，算**未明确判断**。
+   - 硬规则：**未作判断或判断方向错误 → 全题得分不超过 3 分**（理由写得再好也不加）。
+   - 把这个结论填进下面的 `judgment` 字段，并据此给出 score。
+3. 输出必须是纯 JSON，字段如下（不要 markdown 代码块）：
 {
   "score": 11.5,
   "full_score": 15,
+  "judgment": {"student": "错误", "correct": "错误", "matched": true,
+               "explicit": true, "note": "学生开头明确写了该说法错误"},
   "hit_seqs": [1, 2, 4],
   "miss_seqs": [3, 5],
   "extra_credit": [{"text": "学生多写的合理内容", "suggest_score": 1.0}],
@@ -671,17 +703,19 @@ GRADE_EXTRA = """
   "optimized": "基于学生框架的优化版作答（补充处用 **粗体**）",
   "standard_points": [{"seq": 1, "claim": "采分点", "score": 3}]
 }
+`judgment` 仅对辨析题填写；简答题/分析论述题把它设为 null。
 3. cause 只能取：不会 / 记混 / 看漏条件 / 时间不够。
 4. hit_seqs 中的序号必须来自题目给出的采分点序号。
 """
 
-
 def grade_answer(question_stem, points, student_text=None, full_score=15,
-                 use_thinking=True, image_data_url=None):
+                 use_thinking=True, image_data_url=None, qtype=None):
     """批改主观题。
 
     image_data_url: "data:image/jpeg;base64,..." —— 手写照片。
     有图片时走多模态：先识别手写内容，再按规则批改。
+    qtype: 'analysis'（辨析题）时才启用「判断正误」这一维的硬规则；
+           简答/论述不必判断正误，避免模型给它们硬凑一个 judgment。
     """
     plist = "\n".join(
         f"{p['seq']}. {p['claim']}" + (f"（判分依据：{p['evidence']}）" if p.get("evidence") else "")
@@ -707,10 +741,17 @@ def grade_answer(question_stem, points, student_text=None, full_score=15,
             {"type": "image_url", "image_url": {"url": image_data_url}},
         ]
         user_msg = {"role": "user", "content": content}
-        extra = '\n5. 额外字段：`recognized`（识别出的学生原文）、`recognize_note`（识别存疑说明）。'
+        extra = '\n7. 额外字段：`recognized`（识别出的学生原文）、`recognize_note`（识别存疑说明）。'
     else:
         user_msg = {"role": "user", "content": head + f"\n【学生作答】\n{student_text}\n\n请按规则批改，输出 JSON。"}
         extra = ""
+
+    # 「判断」这一维只对辨析题生效：简答/论述没有正误可判，硬套会让模型乱填
+    if qtype == "analysis":
+        extra += ("\n6. 本题是**辨析题**：必须填写 `judgment` 字段（见上文第 2 条），"
+                  "并在理由给分之外单独判定这一维。")
+    else:
+        extra += ("\n6. 本题不是辨析题：`judgment` 必须为 null，不要凭空判断正误。")
 
     data, usage = chat_json(
         [

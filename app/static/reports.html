@@ -35,6 +35,9 @@
   button.ghost { background:#fff; color:var(--accent); }
   button.danger { background:#fff; border-color:#e6b8b8; color:var(--bad); }
   button.mini { font-size:12px; padding:4px 10px; }
+  /* 跳去练习日志看「这次到底做了哪些题」——与日志板块双向联动的入口 */
+  a.linkbtn { font-size:12px; padding:4px 10px; border-radius:6px; border:1px solid var(--accent);
+              background:#fff; color:var(--accent); text-decoration:none; display:inline-block; }
   .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:10px; }
   .muted { color:var(--muted); font-size:13px; }
   /* 趋势图：纯 CSS 柱状图，不引图表库 */
@@ -200,10 +203,12 @@ function renderItems(items) {
         <div class="row">
           <button class="ghost mini" onclick="genReport(${it.session_id}, this)">重新生成</button>
           <button class="danger mini" onclick="delReport(${it.report_id})">删除报告</button>
+          <a class="linkbtn mini" href="/logs?date=${encodeURIComponent(it.date || '')}&sid=${it.session_id}">查看本次作答明细</a>
           <span class="muted">生成于 ${(it.created_at || '').replace('T', ' ')}</span>
         </div>` : `
         <div class="row">
           <button onclick="genReport(${it.session_id}, this)">生成 AI 复盘</button>
+          <a class="linkbtn mini" href="/logs?date=${encodeURIComponent(it.date || '')}&sid=${it.session_id}">先看这次做了哪些题</a>
           <span class="muted">用这一次的作答 + 历史记录生成学习报告</span>
         </div>`}
       ${snap.length ? `

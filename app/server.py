@@ -123,6 +123,16 @@ def ensure_schema():
         if "session_id" not in cols:
             con.execute("ALTER TABLE attempts ADD COLUMN session_id INTEGER")
         con.execute("CREATE INDEX IF NOT EXISTS idx_attempts_session ON attempts(session_id)")
+
+        # 迁移：主观题的「作答原文」与「AI 批改结果」落库。
+        # 为什么必须存：在此之前只存"自评命中了几个采分点"，作答原文与批改详情
+        # **批完渲染到页面上就丢了**（`daily.html` 从不回传）。练习日志要展开到
+        # 题目级明细（题干 / 我的作答 / 批改情况），没有这两列就只能显示"命中 3/5"。
+        # 两列都只对主观题写值；客观题的选项沿用 `note`（历史数据不能动）。
+        if "student_answer" not in cols:
+            con.execute("ALTER TABLE attempts ADD COLUMN student_answer TEXT")
+        if "grade" not in cols:
+            con.execute("ALTER TABLE attempts ADD COLUMN grade TEXT")
         con.commit()
 
         # 迁移：补齐采分点的大纲挂载（继承所属题目的考点）
@@ -483,7 +493,8 @@ def save(payload: dict):
     }
     """
     date = payload.get("date") or datetime.now().strftime("%Y-%m-%d")
-    saved = {"single": 0, "subjective": 0, "point_hits": 0}
+    saved = {"single": 0, "subjective": 0, "point_hits": 0,
+             "answer_text_saved": 0, "grade_saved": 0}
     single_right = 0
 
     # 本次写入的边界哨兵：记下插入前的最大 attempt id，之后只把 id 更大的记录算作「本次」。
@@ -518,10 +529,22 @@ def save(payload: dict):
         tot = con.execute("SELECT COUNT(*) FROM points WHERE question_id=?", (qid,)).fetchone()[0]
         con.close()
         hits = item.get("hits") or []
+        # 作答原文 + AI 批改结果：练习日志要靠它们展示"我的作答 / 批改情况"。
+        # grade 兼容两种入参：对象（前端直接用）或已序列化的字符串（历史调用方）。
+        grade = item.get("grade")
+        if grade is not None and not isinstance(grade, str):
+            grade = json.dumps(grade, ensure_ascii=False)
+        answer_text = (item.get("answer_text") or "").strip() or None
         aid = exec_sql(
-            "INSERT INTO attempts (question_id,date,mode,hits,total,cause,note) VALUES (?,?,?,?,?,?,?)",
-            (qid, date, "主观自评", len(hits), tot, item.get("cause"), item.get("note")),
+            "INSERT INTO attempts (question_id,date,mode,hits,total,cause,note,"
+            "student_answer,grade) VALUES (?,?,?,?,?,?,?,?,?)",
+            (qid, date, "主观自评", len(hits), tot, item.get("cause"), item.get("note"),
+             answer_text, grade),
         )
+        if answer_text:
+            saved["answer_text_saved"] += 1
+        if grade:
+            saved["grade_saved"] += 1
         for seq in hits:
             pid = rows("SELECT id FROM points WHERE question_id=? AND seq=?", (qid, seq))
             if pid:
@@ -633,18 +656,226 @@ def weakness():
     }
 
 
+QTYPE_LABEL = {"single": "单选", "analysis": "辨析", "short": "简答", "essay": "论述"}
+
+
+def _json_or(value, default):
+    """容错解析库里的 JSON 文本：坏数据/空值一律给 default，不让一个字段炸掉整个接口。"""
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except Exception:
+        return default
+
+
 @app.get("/api/logs")
-def logs(limit: int = 50):
-    """练习日志：每次提交一条，含当刻薄弱点快照。"""
+def logs(limit: int = 200):
+    """练习日志：**按天分组**，每天下面挂当天练的每一组，并标出是否已生成复盘。
+
+    为什么按天（而不是按次）：用户要的是"每天的学习记录"。一天可能练好几组
+    （模拟考试 + 日常练习），更关键的是**早期有 20 条作答直接写库、没有 session**
+    （见 docs/交接文档.md §4 P0）—— 按次分组它们永远显示不出来，按天才能顺带收进
+    `loose_attempts`，这些数据在页面上才看得见。
+
+    `items` 保留旧的扁平结构（按次一条），给老调用方兜底。
+    """
     ensure_schema()
-    out = []
-    for r in rows("SELECT * FROM sessions ORDER BY id DESC LIMIT ?", (limit,)):
-        try:
-            r["weak_snapshot"] = json.loads(r["weak_snapshot"] or "[]")
-        except Exception:
-            r["weak_snapshot"] = []
-        out.append(r)
-    return {"items": out, "count": len(out)}
+
+    sessions = rows(
+        "SELECT s.*, s.id AS session_id, r.id AS report_id, r.created_at AS report_created_at, "
+        "       (SELECT COUNT(*) FROM attempts a WHERE a.session_id = s.id) AS attempts_n "
+        "FROM sessions s LEFT JOIN reports r ON r.session_id = s.id "
+        "ORDER BY s.id DESC LIMIT ?", (limit,))
+    for s in sessions:
+        s["weak_snapshot"] = _json_or(s.get("weak_snapshot"), [])
+
+    # 没挂 session 的作答：按天汇总，让它们也能出现在日志里
+    loose_rows = rows(
+        "SELECT a.date, COUNT(*) AS attempts_n, "
+        "       SUM(CASE WHEN q.qtype = 'single' THEN 1 ELSE 0 END) AS objective_total, "
+        "       SUM(CASE WHEN q.qtype = 'single' AND a.hits = 1 THEN 1 ELSE 0 END) AS objective_right, "
+        "       SUM(CASE WHEN q.qtype <> 'single' OR q.qtype IS NULL THEN 1 ELSE 0 END) AS subjective_count "
+        "FROM attempts a LEFT JOIN questions q ON q.id = a.question_id "
+        "WHERE a.session_id IS NULL GROUP BY a.date")
+
+    days = {}
+    for s in sessions:
+        days.setdefault(s["date"], _new_day(s["date"]))["sessions"].append(s)
+    for l in loose_rows:
+        days.setdefault(l["date"], _new_day(l["date"]))["loose"] = l
+
+    for d in days.values():
+        d["loose_attempts"] = (d["loose"] or {}).get("attempts_n") or 0
+        d["sessions_n"] = len(d["sessions"])
+        d["attempts_n"] = sum(s["attempts_n"] or 0 for s in d["sessions"]) + d["loose_attempts"]
+        d["totals"] = _day_totals(d)
+
+    ordered = sorted(days.values(), key=lambda x: x["date"], reverse=True)
+    summary = {
+        "days": len(ordered),
+        "sessions": len(sessions),
+        "reports": sum(1 for s in sessions if s["report_id"]),
+        "pending": sum(1 for s in sessions if not s["report_id"]),
+        "attempts": sum(d["attempts_n"] for d in ordered),
+        "objective_total": sum(d["totals"]["objective_total"] for d in ordered),
+        "objective_right": sum(d["totals"]["objective_right"] for d in ordered),
+        "objective_score": sum(d["totals"]["objective_score"] for d in ordered),
+    }
+    return {"days": ordered, "items": sessions, "count": len(sessions), "summary": summary}
+
+
+def _new_day(date):
+    return {"date": date, "sessions": [], "loose": None, "loose_attempts": 0,
+            "sessions_n": 0, "attempts_n": 0}
+
+
+def _day_totals(day):
+    """把一天里各组的分数/命中数加总。**没挂 session 的旧作答也算进来**，
+    否则日志顶部那行"累计"会和下面展开看到的题对不上。"""
+    t = {"objective_total": 0, "objective_right": 0, "objective_score": 0.0,
+         "subjective_count": 0, "point_hits": 0, "point_total": 0, "reports": 0}
+    for s in day["sessions"]:
+        t["objective_total"] += s.get("objective_total") or 0
+        t["objective_right"] += s.get("objective_right") or 0
+        t["objective_score"] += s.get("objective_score") or 0
+        t["subjective_count"] += s.get("subjective_count") or 0
+        t["point_hits"] += s.get("point_hits") or 0
+        t["point_total"] += s.get("point_total") or 0
+        if s.get("report_id"):
+            t["reports"] += 1
+    l = day.get("loose") or {}
+    t["objective_total"] += l.get("objective_total") or 0
+    t["objective_right"] += l.get("objective_right") or 0
+    t["objective_score"] += (l.get("objective_right") or 0) * 2   # 311 单选每题 2 分
+    t["subjective_count"] += l.get("subjective_count") or 0
+    return t
+
+
+@app.get("/api/logs/day/{date}")
+def logs_day(date: str):
+    """某一天的作答明细：题干 / 我的作答 / 批改情况，按「哪一组练习」分块。
+
+    与复盘的联动就在这里：每块带 `report_id` —— 有值说明这次已生成复盘报告，
+    页面给"查看复盘报告"，没值则给"生成 AI 复盘"，两个板块互相跳得通。
+    """
+    ensure_schema()
+    return _day_detail(date)
+
+
+def _attempt_detail(a, points):
+    """把一条作答整理成日志明细需要的样子。
+
+    题目可能已被删或换过库 —— 字段全部走 LEFT JOIN，取不到时 `missing=True`，
+    让"题目不在题库里"在页面上**可见**，而不是静默少一行（交接文档 §5.1.2）。
+    """
+    extra = _json_or(a.get("extra"), {}) or {}
+    d = {
+        "attempt_id": a["attempt_id"],
+        "question_id": a["question_id"],
+        "qtype": a["qtype"],
+        "qtype_label": QTYPE_LABEL.get(a["qtype"], a["qtype"] or "未知"),
+        "number": a["number"],
+        "stem": a["stem"],
+        "year": a["year"],
+        "source": a["source"],
+        "outline_name": a["outline_name"],
+        "outline_path": a["outline_path"],
+        "missing": a["qtype"] is None,
+        "cause": a["cause"],
+        "hits": a.get("hits"),
+        "total": a.get("total"),
+        "is_right": None,
+        "score": None,
+        "full_score": None,
+        "my_answer": None,
+        "correct_answer": None,
+        "options": {},
+        "points": points,
+        "grade": _json_or(a.get("grade"), None),
+        "explain": extra.get("explain") or None,
+        "reference": extra.get("answer_text") or None,
+    }
+    if a["qtype"] == "single":
+        d["options"] = _json_or(a.get("options"), {}) or {}
+        d["my_answer"] = a.get("note")           # 客观题：选中的选项字母存在 note 里
+        d["correct_answer"] = a.get("answer")
+        d["is_right"] = (a.get("hits") == 1)
+        d["score"] = 2 if d["is_right"] else 0
+        d["full_score"] = 2
+    else:
+        d["full_score"] = extra.get("full_score", 15)
+        # 主观题：作答原文（早期记录为空）。**题目已不存在时退回 note** ——
+        # 旧数据把客观题的选项字母存在 note 里（实测 attempts#1 note='A'），
+        # 题目查不到就没法判断题型，只能靠它把"我选了什么"显示出来。
+        d["my_answer"] = a.get("student_answer") or (a.get("note") if d["missing"] else None)
+    return d
+
+
+def _day_detail(date):
+    arows = rows(
+        "SELECT a.id AS attempt_id, a.question_id, a.date, a.mode, a.hits, a.total, "
+        "       a.cause, a.note, a.session_id, a.student_answer, a.grade, "
+        "       q.qtype, q.number, q.stem, q.options, q.answer, q.year, q.source, q.extra, "
+        "       o.name AS outline_name, o.path AS outline_path "
+        "FROM attempts a "
+        "LEFT JOIN questions q ON q.id = a.question_id "
+        "LEFT JOIN outline_nodes o ON o.id = q.outline_id "
+        "WHERE a.date = ? "
+        "ORDER BY (a.session_id IS NULL), a.session_id, a.id", (date,))
+
+    # 采分点逐点命中：当天所有主观题一次性取回，避免每道题查一次。
+    # 不取 `points.score`：全库 946 行**没有一个写过这个列**（所有 INSERT 都不带它），
+    # 取它只会白白多一个 schema 依赖 —— 早前的空库用例就是这么炸出来的。
+    pts = {}
+    for p in rows(
+        "SELECT a.id AS attempt_id, p.seq, p.claim, p.evidence, "
+        "       COALESCE(ph.hit, 0) AS hit "
+        "FROM attempts a "
+        "JOIN points p ON p.question_id = a.question_id "
+        "LEFT JOIN point_hits ph ON ph.point_id = p.id AND ph.attempt_id = a.id "
+        "WHERE a.date = ? ORDER BY a.id, p.seq", (date,)):
+        pts.setdefault(p["attempt_id"], []).append(
+            {"seq": p["seq"], "claim": p["claim"], "evidence": p["evidence"],
+             "hit": bool(p["hit"])})
+
+    smeta = {s["id"]: s for s in rows(
+        "SELECT s.*, r.id AS report_id, r.created_at AS report_created_at "
+        "FROM sessions s LEFT JOIN reports r ON r.session_id = s.id "
+        "WHERE s.date = ?", (date,))}
+
+    groups = []
+    for a in arows:
+        sid = a["session_id"]
+        g = next((x for x in groups if x["session_id"] == sid), None)
+        if g is None:
+            s = smeta.get(sid) or {}
+            g = {
+                "session_id": sid,
+                "loose": sid is None,
+                "mode": s.get("mode") or ("未归属记录" if sid is None else "未标注"),
+                "note": s.get("note"),
+                "created_at": s.get("created_at"),
+                "report_id": s.get("report_id"),
+                "report_created_at": s.get("report_created_at"),
+                "questions": [],
+            }
+            groups.append(g)
+        g["questions"].append(_attempt_detail(a, pts.get(a["attempt_id"], [])))
+
+    for g in groups:
+        singles = [q for q in g["questions"] if q["qtype"] == "single"]
+        subjs = [q for q in g["questions"] if q["qtype"] != "single"]
+        right = sum(1 for q in singles if q["is_right"])
+        g["summary"] = {
+            "objective_total": len(singles), "objective_right": right,
+            "objective_score": right * 2, "subjective_count": len(subjs),
+            "point_hits": sum(1 for q in subjs for p in q["points"] if p["hit"]),
+            "point_total": sum(len(q["points"]) for q in subjs),
+        }
+
+    return {"ok": True, "date": date, "groups": groups, "count": len(arows),
+            "missing_n": sum(1 for g in groups for q in g["questions"] if q["missing"])}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -1056,10 +1287,31 @@ def daily_grade(payload: dict):
             full_score=full,
             use_thinking=True,
             image_data_url=image_data_url,
+            qtype=q["qtype"],
         )
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-    return {"ok": True, "result": data, "usage": usage}
+
+    # 辨析题的「判断错/未判断 → 全题不超过 3 分」是官方硬规则，
+    # 不能只靠模型自觉：这里由程序**实际封顶**（模型有时会把理由分给满）。
+    cap_note = None
+    if q["qtype"] == "analysis":
+        j = data.get("judgment") or {}
+        explicit = bool(j.get("explicit"))
+        matched = bool(j.get("matched"))
+        score = data.get("score")
+        if not explicit or not matched:
+            cap = 3.0
+            if isinstance(score, (int, float)) and score > cap:
+                data["score"] = cap
+                cap_note = (f"辨析题判断{'缺失' if not explicit else '错误'} → "
+                            f"按规则封顶 {cap:g} 分（理由分不再累加）")
+            elif not isinstance(score, (int, float)):
+                cap_note = "未能解析出分数，请人工复核"
+        data["judgment_cap_applied"] = cap_note
+
+    return {"ok": True, "result": data, "usage": usage,
+            **({"score_cap_note": cap_note} if cap_note else {})}
 
 
 # ============================================================ ⑤ 学习复盘报告
@@ -1229,9 +1481,16 @@ def reports_list(limit: int = 200):
     ensure_schema()
 
     items = []
+    # session_id / date / mode 一律取 **sessions 的**，不取 reports 的：这里是 LEFT JOIN，
+    # 还没生成报告的那次 `r.*` 全是 NULL —— 复盘页那张卡片会没有日期，更要命的是
+    # `session_id` 为空会让「生成 AI 复盘」按钮把报告生成到**错误的那一次练习**上
+    # （后端对空 session_id 的兜底是"取最近一次"）。这两个 bug 都被
+    # "点按钮时它恰好就是最近一次练习"和"所有练习都已生成报告"的数据掩盖了，
+    # 直到在真 clone 上跑前端验收才暴露。
     for r in rows(
-        "SELECT r.id AS report_id, r.session_id, r.date, r.mode, r.content, r.metrics, "
-        "       r.created_at, s.objective_total, s.objective_right, s.objective_score, "
+        "SELECT r.id AS report_id, s.id AS session_id, s.date AS date, s.mode AS mode, "
+        "       r.content, r.metrics, r.created_at, "
+        "       s.objective_total, s.objective_right, s.objective_score, "
         "       s.subjective_count, s.point_hits, s.point_total, s.note, s.weak_snapshot "
         "FROM sessions s LEFT JOIN reports r ON r.session_id = s.id "
         "ORDER BY s.id DESC LIMIT ?", (limit,)):
