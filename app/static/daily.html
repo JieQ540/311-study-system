@@ -61,6 +61,20 @@
            border-left:3px solid var(--muted); background:#fafafa; }
   .judge.ok { border-left-color:#2f855a; background:#f0f9f3; }
   .judge.bad { border-left-color:var(--bad); background:#fdf0f0; }
+
+  /* ===== 出题设置（难度档位 + 思考模式）===== */
+  .genset { border:1px solid var(--line); border-radius:8px; padding:10px 14px; margin-top:12px;
+            background:#fcfcfd; }
+  .genset > summary { cursor:pointer; font-size:14px; font-weight:600; }
+  .diff-steps { display:flex; gap:6px; flex-wrap:wrap; margin:10px 0 8px; }
+  .diff-steps button { font-size:13px; padding:4px 12px; border-radius:14px; background:#fff;
+                       color:var(--ink); border:1px solid var(--line); }
+  .diff-steps button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .diff-desc { font-size:12.5px; color:var(--muted); line-height:1.7; }
+  .diff-desc b { color:var(--ink); }
+  .think-toggle { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:14px; }
+  .think-toggle input { width:16px; height:16px; }
+  .tag.diff { background:#eef3f8; color:var(--accent); }
 </style>
 </head>
 <body>
@@ -95,9 +109,13 @@
     </div>
     <p class="muted" style="margin:6px 0 0;font-size:12.5px">
       「全 AI 模拟组」= 按上面这段学习记录定主题，题目全部 AI 原创（<b>不抽真题</b>），
-      难度对标 311 真题、刻意避免识记题；最后一题论述题带材料，取材于
-      <code>source/教育热点.md</code> 里的真实政策热点。生成约需 1–3 分钟、会先做一次质量自检。
+      难度按下面的「出题设置」走、刻意避免识记题；最后一题论述题带材料，取材于
+      <code>source/教育热点.md</code> 里的真实政策热点。生成耗时取决于思考模式开关。
     </p>
+    <details class="genset" open>
+      <summary>⚙ 出题设置（难度档位 / 思考模式）</summary>
+      <div class="genset-body"></div>
+    </details>
     <div id="aiSetReport"></div>
     <div id="focusBox"></div>
   </section>
@@ -107,6 +125,10 @@
     <h2>确认考点<span class="muted" style="font-weight:400;font-size:13px">（取消勾选不相关的，AI 偶尔会多识别）</span></h2>
     <div id="matches"></div>
     <div id="unmatchedBox"></div>
+    <details class="genset">
+      <summary>⚙ 出题设置<span class="muted" id="genSetBrief"></span></summary>
+      <div class="genset-body"></div>
+    </details>
     <div class="row">
       <button onclick="doGenerate()" id="btnGen">按这些考点出题（20 客观 + 3 主观）</button>
       <button class="ghost" onclick="goStep(1)">返回修改记录</button>
@@ -142,6 +164,90 @@
 let MATCHES = [], PAPER = null, SUBJECTIVE_IDS = [], SESSION_ID = null, GRADES = {};
 
 const $ = id => document.getElementById(id);
+const esc = s => (s === null || s === undefined ? '' : String(s))
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// ===== 出题设置（难度档位 + 思考模式）=====
+// 档位说明从 /api/daily/gen-options 取 —— 与提示词**同源**（ai.DIFFICULTY_LEVELS）。
+// 不在页面上另写一份：写两份迟早会和真正喂给 AI 的提示词对不上，那时页面上的说明就是假的。
+const GEN_KEY = 'qa_gen_settings';
+let GEN_OPTS = null;
+let GEN = { difficulty: 3, thinking: true };
+
+function loadGenSettings() {
+  try {
+    const s = JSON.parse(localStorage.getItem(GEN_KEY) || 'null');
+    if (s && typeof s === 'object') {
+      GEN = { difficulty: parseInt(s.difficulty) || 3, thinking: s.thinking !== false };
+    }
+  } catch (e) { /* 坏数据就用默认 */ }
+}
+function saveGenSettings() {
+  try { localStorage.setItem(GEN_KEY, JSON.stringify(GEN)); } catch (e) {}
+}
+// 模拟考试页（/）读的是同一个 localStorage 键，所以那里的 AI 补题也跟着这个设置走
+function thinkLabel() { return GEN.thinking ? '思考开' : '思考关'; }
+
+function renderGenSettings() {
+  const levels = (GEN_OPTS && GEN_OPTS.levels) || {};
+  const lv = levels[String(GEN.difficulty)] || {};
+  const html = `
+    <div class="diff-steps">
+      ${[1, 2, 3, 4, 5].map(n => {
+        const L = levels[String(n)] || {};
+        const on = n === GEN.difficulty;
+        return `<button type="button" class="diff-btn ${on ? 'on' : ''}" data-diff="${n}"
+                  title="${esc(L.note || '')}">${n}· ${esc(L.name || '')}</button>`;
+      }).join('')}
+    </div>
+    <div class="diff-desc">
+      <b>这一档的命题要求</b>（下面就是喂给 AI 的实际要求）：
+      <div>· 情境复杂度：${esc(lv.scene || '—')}</div>
+      <div>· 需要几步推理：${esc(lv.steps || '—')}</div>
+      <div>· 干扰项：${esc(lv.distractor || '—')}</div>
+      <div>· 认知层次：${esc(lv.recall || '—')}</div>
+    </div>
+    <label class="think-toggle">
+      <input type="checkbox" class="think-toggle-input" ${GEN.thinking ? 'checked' : ''}>
+      <span>思考模式：让模型**先推理再出题**${GEN.thinking ? '（<b>开</b>）' : '（<b>关</b>）'}</span>
+    </label>
+    <div class="muted" style="font-size:12.5px">
+      ${GEN.thinking
+        ? '开：题目质量更高，但一套约 <b>0.08–0.15 元</b>、<b>3–8 分钟</b>（出题请求的 token 上限与超时会自动放宽）。'
+        : '关：快而便宜（约 <b>0.04 元</b>、<b>1–3 分钟</b>），题目质量略低。随时可以再打开。'}
+      　程序层仍会校验难度是否贴住你选的档位，不达标就带着问题重出。
+    </div>`;
+  document.querySelectorAll('.genset-body').forEach(el => { el.innerHTML = html; });
+  document.querySelectorAll('.diff-btn').forEach(b => b.addEventListener('click', () => {
+    GEN.difficulty = parseInt(b.dataset.diff) || 3;
+    saveGenSettings();
+    renderGenSettings();
+  }));
+  document.querySelectorAll('.think-toggle-input').forEach(c => c.addEventListener('change', () => {
+    GEN.thinking = c.checked;
+    saveGenSettings();
+    renderGenSettings();
+  }));
+  const brief = $('genSetBrief');
+  if (brief) brief.textContent = `（难度 ${GEN.difficulty} · ${thinkLabel()}）`;
+  const btn = $('btnAiSet');
+  if (btn) btn.title = `难度档 ${GEN.difficulty} · ${thinkLabel()} · 全部 AI 原创、不含真题`;
+}
+
+async function bootGenSettings() {
+  loadGenSettings();
+  try {
+    const r = await (await fetch('/api/daily/gen-options')).json();
+    if (r && r.ok) {
+      GEN_OPTS = r;
+      if (!localStorage.getItem(GEN_KEY)) {
+        GEN.difficulty = r.default_difficulty || 3;
+        GEN.thinking = r.default_thinking !== false;
+      }
+    }
+  } catch (e) { /* 取不到就只用本地值，不影响出题 */ }
+  renderGenSettings();
+}
 
 function goStep(n) {
   for (let i = 1; i <= 4; i++) {
@@ -170,9 +276,11 @@ async function doAiSet() {
   if (!text) { $('msg1').textContent = '先在上面写今天学了什么（这决定本组题的主题）'; return; }
   $('btnAiSet').disabled = true;
   $('aiSetReport').innerHTML = '';
-  $('msg1').textContent = '生成中：先定位考点 → 出 20 单选 + 3 主观 → 质量自检（约 1–3 分钟，请勿关页面）…';
+  $('msg1').textContent = `生成中：先定位考点 → 出 20 单选 + 3 主观 → 质量自检`
+    + `（难度档 ${GEN.difficulty} · ${thinkLabel()}，约 ${GEN.thinking ? '3–8' : '1–3'} 分钟，请勿关页面）…`;
   try {
-    const r = await post('/api/daily/ai-set', { user_text: text });
+    const r = await post('/api/daily/ai-set',
+      { user_text: text, difficulty: GEN.difficulty, thinking: GEN.thinking });
     if (!r.ok) {
       // 把失败原因完整显示出来（含服务端回显的文本长度），方便你截图反馈
       $('msg1').innerHTML = '';
@@ -207,42 +315,63 @@ async function doAiSet() {
 
 function renderAiReport(rep) {
   if (!rep) return;
-  const okAll = rep.final_ok;
+  // 程序层判定与 AI 审核意见**可能不一致**（实测有：程序层全过、AI 却说"必须重出"）。
+  // 不一致时不能只显示"通过"——那会把这个信号吞掉，页面自相矛盾。
+  const aiFlag = !!(rep.ai_check && rep.ai_check.must_retry);
+  const okAll = rep.final_ok && !aiFlag;
   const cls = okAll ? 'var(--ok)' : '#b7791f';
+  const headTxt = !rep.final_ok ? '程序层判定不合格'
+    : (aiFlag ? '程序层通过 · AI 建议重出' : '通过');
   const issueRows = (rep.program_issues || []).map(i =>
     `<li>[${i.type}] ${i.target}：${i.detail}</li>`).join('');
   const rounds = (rep.retry_history || []).map(h =>
     `<li>第 ${h.attempt} 轮：AI 判定 pass=${h.ai_pass}、需重出=${h.ai_must_retry}，共 ${h.issue_n} 个问题
       ${h.issues && h.issues.length ? '<div class="kp">' + h.issues.join('<br>') + '</div>' : ''}</li>`).join('');
+  // 难度分布：模型自评的，**是给你自己判断的**，不是"难度已达标"的证明
+  const dist = rep.difficulty_dist || {};
+  const distTxt = Object.keys(dist).sort().map(k => `难度${k}: ${dist[k]} 道`).join(' · ') || '—';
+  const diffMean = (rep.difficulty_mean === null || rep.difficulty_mean === undefined)
+    ? '—' : rep.difficulty_mean;
   $('aiSetReport').innerHTML = `
     <div class="card" style="border-left:3px solid ${cls};margin-top:12px">
       <h4>成组质量自检
         <span class="tag" style="background:${okAll ? '#e8f5ec' : '#fdf3e7'};color:${cls}">
-          ${okAll ? '通过' : '仍有待改进项'}</span>
+          ${headTxt}</span>
         <span class="tag">重出 ${rep.attempts || 1} 轮</span>
+        <span class="tag ${rep.thinking ? 'ai' : ''}">思考模式${rep.thinking ? '开' : '关'}</span>
       </h4>
       <div class="kp">
-        单选 ${rep.single_n} 道（答案分布 ${Object.entries(rep.answer_dist || {}).map(([k, v]) => k + ':' + v).join(' ')}
+        <b>难度档：${rep.difficulty || '—'}（${rep.difficulty_name || ''}）</b>
+        ｜模型自评均值 ${diffMean}
+        ｜分布 ${distTxt}
+        <br>单选 ${rep.single_n} 道（答案分布 ${Object.entries(rep.answer_dist || {}).map(([k, v]) => k + ':' + v).join(' ')}
         ｜最高占比 ${Math.round((rep.answer_top_share || 0) * 100)}%）
         <br>认知层次：${Object.entries(rep.cognitive || {}).map(([k, v]) => k + ' ' + v).join(' · ')}
         <br>主观题采分点：${(rep.points_per_subjective || []).join(' / ')} 个
         ｜论述题带材料：${rep.essay_has_material ? '是' : '否'}
         <br>论述题取材：${(rep.topics_used || []).map(t => t.title).join('；') || '（热点清单为空）'}
+        ${rep.reasoning_tokens ? `<br>推理 token：${rep.reasoning_tokens}（开思考后这部分是主要成本）` : ''}
       </div>
       ${issueRows ? `<details><summary>程序层发现的问题（${(rep.program_issues || []).length} 项）</summary><ul>${issueRows}</ul></details>` : ''}
       ${rounds ? `<details><summary>生成与重出记录</summary><ul>${rounds}</ul></details>` : ''}
       ${rep.ai_check && rep.ai_check.comment ? `<div class="kp">AI 审核意见：${rep.ai_check.comment}</div>` : ''}
+      ${rep.ai_check && rep.ai_check.fallback_no_thinking
+        ? '<div class="kp">（这次质检是**关思考重跑**的：开思考时推理把 token 预算吃光、正文返回空，系统自动降级重试）</div>' : ''}
       <div class="muted" style="font-size:12px;margin-top:6px">
-        这套题全部是 AI 原创、不是真题；难度与风格按 311 真题对标，但仍建议你自己判断质量。
+        这套题全部是 AI 原创、不是真题。难度是**模型自评**的，程序只能校验它贴不贴你选的档位
+        （越档会重出）；真正的判断还得你自己看题 —— 上面的分布就是给你看的。
+        <br>自动重出只由**程序层**的确定性判定触发；AI 审核意见仅作提示（实测它每轮都能挑出新毛病，
+        让它决定重出反而会交出更差的题）。两者不一致时以程序层为准，但意见会显示在上面。
       </div>
     </div>`;
 }
 
 // ---------- 按薄弱点出题（不需要输入学习记录）
 async function doWeakPaper() {
-  $('msg1').textContent = '按薄弱点组卷中…（真题优先，不足用 AI 补，可能 30-60 秒）';
+  $('msg1').textContent = `按薄弱点组卷中…（真题优先，不足用 AI 补；难度档 ${GEN.difficulty} · ${thinkLabel()}）`;
   try {
-    const r = await post('/api/daily/weak-paper', {});
+    const r = await post('/api/daily/weak-paper',
+      { difficulty: GEN.difficulty, thinking: GEN.thinking });
     if (!r.ok) { $('msg1').textContent = r.error || '失败'; return; }
     PAPER = r.paper;
     renderPaper(r);
@@ -300,9 +429,11 @@ async function doGenerate() {
   const ids = [...document.querySelectorAll('.mk:checked')].map(c => MATCHES[+c.dataset.i].id);
   if (!ids.length) { $('msg2').textContent = '至少勾选一个考点'; return; }
   $('btnGen').disabled = true;
-  $('msg2').textContent = '出题中（真题优先，不足用 AI 补）… 可能要 30-60 秒';
+  $('msg2').textContent = `出题中（真题优先，不足用 AI 补；难度档 ${GEN.difficulty} · ${thinkLabel()}）`
+    + `… ${GEN.thinking ? '开思考后可能要几分钟' : '约 30-60 秒'}`;
   try {
-    const r = await post('/api/daily/generate', { point_ids: ids });
+    const r = await post('/api/daily/generate',
+      { point_ids: ids, difficulty: GEN.difficulty, thinking: GEN.thinking });
     if (!r.ok) { $('msg2').textContent = '失败: ' + r.error; return; }
     PAPER = r.paper;
     renderPaper(r);
@@ -318,13 +449,26 @@ async function doGenerate() {
 
 function normSingle(q, srcTag) {
   const opts = typeof q.options === 'string' ? JSON.parse(q.options || '{}') : (q.options || {});
+  // difficulty 是模型自评的（AI 生成题才有）；真题没有这一项，页面上就不显示难度标签
+  let diff = q.difficulty;
+  if (diff === undefined) { try { diff = JSON.parse(q.extra || '{}').difficulty; } catch (e) {} }
   return { id:q.id, stem:q.stem, options:opts, tag:srcTag,
-           number:q.number || '', outline:q.outline_id };
+           number:q.number || '', outline:q.outline_id, difficulty:diff };
 }
 function normSubj(q, srcTag) {
+  let extra = {};
+  try { extra = JSON.parse(q.extra || '{}'); } catch (e) {}
   return { id:q.id, qtype:q.qtype, stem:q.stem, tag:srcTag,
-           full_score:(q.extra && JSON.parse(q.extra||'{}').full_score) || q.full_score || 15,
-           points:q.points || [], outline:q.outline_id };
+           full_score: extra.full_score || q.full_score || 15,
+           points:q.points || [], outline:q.outline_id,
+           difficulty: q.difficulty !== undefined ? q.difficulty : extra.difficulty };
+}
+
+// 难度标签：只有 AI 生成题带自评难度，真题不显示（别把自评数字伪装成客观事实，
+// 所以标签写「AI 自评难度 n」而不是「难度 n」）
+function diffTag(q) {
+  const d = parseInt(q.difficulty);
+  return (d >= 1 && d <= 5) ? `<span class="tag diff" title="模型自评难度，仅供参考">AI 自评难度 ${d}</span>` : '';
 }
 
 // 客观题答案 + 解析：默认隐藏，提交/点按钮后才显示（数据在 questions.extra.explain）
@@ -364,7 +508,7 @@ function renderPaper(r) {
     ${singles.map((q,i) => `
       <div class="q">
         <div class="stem"><span class="no">${i+1}.</span>${q.stem}
-          <span class="tag ${q.tag==='真题'?'real':'ai'}">${q.tag}</span></div>
+          <span class="tag ${q.tag==='真题'?'real':'ai'}">${q.tag}</span>${diffTag(q)}</div>
         ${Object.entries(q.options).map(([k,v]) =>
           `<label class="opt"><input type="radio" name="sq${q.id}" value="${k}"><b>${k}.</b> ${v}</label>`).join('')}
         ${dailyAnswerHtml(q)}
@@ -375,7 +519,7 @@ function renderPaper(r) {
       <div class="q" id="sub-${q.id}">
         <div class="stem"><span class="no">${i+1}.</span>${q.stem}
           <span class="tag">${typeName[q.qtype]||q.qtype} · ${q.full_score}分</span>
-          <span class="tag ${q.tag==='真题'?'real':'ai'}">${q.tag}</span></div>
+          <span class="tag ${q.tag==='真题'?'real':'ai'}">${q.tag}</span>${diffTag(q)}</div>
         <div class="row" style="margin:6px 0">
           <button class="ghost mini" onclick="togglePts(${q.id}, this)">展开/收起采分点自评</button>
           <button class="ghost mini" onclick="aiGrade(${q.id})">AI 批改（用下方文本）</button>
@@ -600,6 +744,9 @@ async function loadWeakness() {
   box.style.display = 'block';
   box.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+
+// 进页面就把「出题设置」渲染出来（档位说明要等接口返回，所以是异步的）
+bootGenSettings();
 </script>
 </body>
 </html>

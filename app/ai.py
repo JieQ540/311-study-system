@@ -23,9 +23,14 @@ import urllib.error
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]   # 公开副本：相对路径
+# 让 app/ 一定可导入（ai.py 可能被 server.py 以任意 cwd 导入）
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# 库的位置必须和 server.py 完全一致，否则会出现「服务读 A 库、AI 写 B 库」。
+# 统一走 dbpath，顺便也就认了 DSH_DB（旧版本这里不认，和 server.py 不一致）。
+from dbpath import DB  # noqa: E402
+
 CFG_PATH = ROOT / "config.json"
-DB = ROOT / "data" / ("kaoyan.db" if (ROOT / "data" / "kaoyan.db").exists()
-                       else "kaoyan-seed.db")
 
 _CFG = None
 
@@ -50,8 +55,13 @@ def cfg():
     return _CFG
 
 
-def chat(messages, *, thinking=None, max_tokens=2048, temperature=None, json_mode=False):
-    """底层调用。thinking: None=用配置默认；True/False=强制开关。"""
+def chat(messages, *, thinking=None, max_tokens=2048, temperature=None, json_mode=False,
+         timeout=None):
+    """底层调用。thinking: None=用配置默认；True/False=强制开关。
+
+    timeout: 秒。默认取 config 的 timeout_seconds；**出题调用必须单独放宽** ——
+    开思考后一次 20 题的请求实测远超旧的 180 秒（见 gen_limits 的说明）。
+    """
     c = cfg()["api"]
     use_thinking = (c.get("thinking", "disabled") == "enabled") if thinking is None else thinking
     payload = {
@@ -74,7 +84,8 @@ def chat(messages, *, thinking=None, max_tokens=2048, temperature=None, json_mod
             "Authorization": "Bearer " + c["api_key"],
         },
     )
-    with urllib.request.urlopen(req, timeout=c.get("timeout_seconds", 180)) as r:
+    with urllib.request.urlopen(
+            req, timeout=c.get("timeout_seconds", 180) if timeout is None else timeout) as r:
         res = json.loads(r.read().decode("utf-8"))
     content = res["choices"][0]["message"]["content"]
     usage = res.get("usage") or {}
@@ -169,17 +180,154 @@ def parse_study_log(text, max_sections=60):
 
 # ---------------------------------------------------------------- ② 出题
 
+# ---- ②a 难度档位 ----------------------------------------------------------
+# 五档难度，**每一档都给"可观察的命题特征"**，而不是"难一点/简单一点"这种形容词：
+# 实测模型对抽象难度词基本无感（"难度要对标真题"写了它也当耳边风）。
+# 程序层唯一能校验的是模型**自评的 difficulty 数字**，所以真正起作用的是下面这套描述，
+# 数字校验只当兜底（校验不过就带着问题重出）。
+DIFFICULTY_LEVELS = {
+    1: {"name": "偏易 · 打基础",
+        "scene": "一两句直白的短情境，条件与人物都摆在明面上",
+        "steps": "认准考的是哪个概念即可（1 步）",
+        "distractor": "四个选项分属明显不同的类别或时期，学过就能排除",
+        "recall": "识记题最多三成",
+        "note": "用来检查基础概念有没有记住、有没有混淆"},
+    2: {"name": "中等",
+        "scene": "一段简短情境（课堂片段、学校做法、教育现象），要读完再判断",
+        "steps": "先认出概念、再对号入座（1–2 步）",
+        "distractor": "干扰项是与正确项相邻的易混概念",
+        "recall": "识记题最多三成",
+        "note": "常规练习用"},
+    3: {"name": "对标真题（默认）",
+        "scene": "真题式情境：课堂对话、学校做法、学者观点、研究场景或政策片段，一般 2–5 句",
+        "steps": "读懂情境 → 匹配理论 → 排除近似项（2 步）",
+        "distractor": "同一抽象层次上的近义概念，必须理解理论才能排除",
+        "recall": "识记题最多三成",
+        "note": "与 311 真题的常见难度一致"},
+    4: {"name": "偏难",
+        "scene": "多主体、多变量的长情境（两种做法对比、一组调查数据、一段政策争议），常含无关信息",
+        "steps": "先剥离无关信息，再做两步以上推断（2–3 步）",
+        "distractor": "来自**同一理论流派**的相近主张，或对同一现象的两种合理解释，"
+                      "只有一条最贴合题干的限定条件",
+        "recall": "识记题不超过一成",
+        "note": "用来拉开区分度"},
+    5: {"name": "极难",
+        "scene": "跨章节综合的长材料（可含数据、图表描述、相互冲突的观点），信息要自行取舍",
+        "steps": "3 步以上：定位考点 → 比较多种理论解释 → 用题干限定条件排除",
+        "distractor": "每一项都像常见的错误理解，必须精确辨析概念边界才能选出唯一最贴合的一项",
+        "recall": "不要出识记题",
+        "note": "冲刺用，错得多很正常"},
+}
+DEFAULT_DIFFICULTY = 3
+
+
+def normalize_difficulty(v):
+    """把外部传进来的难度收敛到 1–5；非法值一律回默认档。"""
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return DEFAULT_DIFFICULTY
+    return min(5, max(1, n))
+
+
+def difficulty_block(level):
+    """把难度档渲染成要插进出题 system prompt 的命题要求。"""
+    level = normalize_difficulty(level)
+    d = DIFFICULTY_LEVELS[level]
+    return f"""【本次难度档位：{level} / 5 —— {d['name']}】
+- 情境复杂度：{d['scene']}
+- 需要几步推理：{d['steps']}
+- 干扰项要求：{d['distractor']}
+- 认知层次：{d['recall']}（**这是本档位的硬指标，不是建议**）
+- 全组每道题都按这一档来，自评 `difficulty` 一律贴近 {level}（允许 ±1，不要整组飘到别的档位）。
+- 本档用途：{d['note']}"""
+
+
+def gen_limits(thinking):
+    """出题调用的 max_tokens / 超时（按是否开思考取不同的值）。
+
+    **开思考必须放宽 max_tokens**：推理 token 也算在 completion 里，20 题的正文约 8k，
+    加上推理很容易撞上旧的 16000 上限 —— 一旦截断，返回的 JSON 就不完整，
+    整个出题会以"解析失败"告终。超时同理，旧的 180 秒对开思考的出题调用不够。
+
+    （探测实测，同一个"出 3 道单选题"的任务：关思考输出 154 tokens；
+      开思考输出 1661 tokens，其中推理占 1456。）
+    """
+    try:
+        g = cfg().get("generate") or {}
+    except Exception:
+        # 这个函数**只是读配置**，不该因为缺 config.json / key 就抛异常 ——
+        # 公开副本里刚 clone、还没配 key 时就是这种状态，一抛就会让调用方以为
+        # "出题逻辑坏了"，而其实是"还没配 key"（该报的是后者）。
+        g = {}
+    if thinking:
+        return {"single": g.get("single_max_tokens_thinking", 32000),
+                "subj": g.get("subj_max_tokens_thinking", 20000),
+                # 质检也要给足：实测开思考时它会把 4000 全用在推理上、正文返回空串，
+                # 于是 JSON 解析失败、整份质检报告拿不到（真实生成里踩到过）。
+                "check": g.get("check_max_tokens_thinking", 12000),
+                "points": g.get("points_max_tokens_thinking", 20000),
+                "timeout": g.get("timeout_seconds", 600),
+                "plain_check": g.get("check_max_tokens", 2500),
+                "plain_timeout": g.get("timeout_seconds_plain", 180)}
+    return {"single": g.get("single_max_tokens", 16000),
+            "subj": g.get("subj_max_tokens", 10000),
+            "check": g.get("check_max_tokens", 2500),
+            "points": g.get("points_max_tokens", 8000),
+            "timeout": g.get("timeout_seconds_plain", 180),
+            "plain_check": g.get("check_max_tokens", 2500),
+            "plain_timeout": g.get("timeout_seconds_plain", 180)}
+
+
+def add_usage(total, u):
+    """累加用量。**单独统计推理 token** —— 开思考后它就是主要成本，
+    不统计的话"贵在哪"完全看不见（实测同一任务推理占输出的 88%）。"""
+    for k in ("prompt_tokens", "completion_tokens"):
+        total[k] = total.get(k, 0) + (u or {}).get(k, 0)
+    r = ((u or {}).get("completion_tokens_details") or {}).get("reasoning_tokens") or 0
+    if r:
+        total["reasoning_tokens"] = total.get("reasoning_tokens", 0) + r
+    return total
+
+
+def estimate_cost(usage):
+    """按 DeepSeek 价目粗估花费（输入 1 元/百万、输出 4 元/百万）。"""
+    u = usage or {}
+    return u.get("prompt_tokens", 0) / 1e6 + u.get("completion_tokens", 0) / 1e6 * 4
+
 GEN_SYS = """你是考研 311 教育学专业基础的命题专家，严格依据统考大纲命题。
 
-【难度要求 —— 最关键，不接受降低标准】
-311 真题的客观题极少直接问定义。真实命题特征：
-1. **情境化**：先给一个小情境（教学片段、教育现象、研究场景、政策文件、学者观点），
-   再问「这体现了/属于/说明」——而不是「XX 的定义是」。
-2. **认知层次**：主要考**理解、应用、分析**。**严禁**出「XX 是什么」这类纯识记题。
+@@DIFFICULTY@@
+
+【无论哪一档都必须做到】
+1. **题干必须有情境**：先给一个具体情境（教学片段、课堂对话、学校做法、教育现象、研究场景、
+   政策文件、学者观点），再问「这体现了/属于/说明/最适合用……解释」。
+   **严禁**直接问「XX 的定义是」「XX 是谁提出的」「XX 发表于哪一年」这类背了就会的题。
+2. **认知层次**：主要考**理解、应用、分析**，至少含辨析、比较、应用、归因之一。
 3. **干扰项质量**：四个选项必须处于同一抽象层次；干扰项要是**真实的常见误解**或**相近概念**
    （如同属一个理论流派的其他观点、易混的教育家主张），不能一眼排除。
-4. **辨异**：高频考法是「下列选项中，符合/不符合……的是」，或「甲乙两人观点分别属于……」。
-5. 题干信息量要够（2–5 句），必要时给学者原话、实验描述或数据。
+4. **情境外壳测试（必做自查）**：把情境去掉以后，如果这道题退化成
+   「某人的主张是什么」「XX 的定义/特点是什么」这种**人物—主张配对或背标签题**，
+   那它就是**披着情境外壳的识记题**，必须重新设计。
+   - 实测反例（2026-09-17 真实生成里被质检点名的写法，一律不要）：
+     ✗「一位教师受到裴斯泰洛齐的启发，先让儿童数物品、画线条、说单词……问这体现了裴斯泰洛齐的什么思想？」
+       —— 去掉情境就是「要素教育是什么」，记住标签就会做。
+     ✗「一位教师不预设行为目标、围绕有争议议题组织课程……问这属于哪种课程开发模式？」
+       —— 去掉情境就是「斯腾豪斯过程模式的特点」。
+   - ✓ 正确做法：情境里的**具体条件必须参与判断**（谁做了什么、出现了什么结果、哪一点与理论相冲突），
+     让人"背得出理论定义"仍然不足以作答，必须拿情境去比对理论。
+5. **正确项不得明显比其他选项长或"更全面"**：学生不该靠"哪项最长最完整"就蒙对。
+   正确项与其余三项的平均字数差控制在 10 字以内 ——
+   **这一条有程序层校验，违反会被判不合格并整组重出**。
+6. **辨异**：高频考法是「下列选项中，符合/不符合……的是」，或「甲乙两人观点分别属于……」。
+7. 题干信息量要够（2–5 句），必要时给学者原话、实验描述或数据。
+
+【命题流程 —— 请先在脑中走完这四步，再一次性输出 JSON】
+1. 确认每道题考的是所给清单里的哪一个考点；
+2. 为每题构造情境，并确认这个情境**唯一地**指向正确项；
+3. 设计三个"像对但错"的干扰项，逐项确认它们到底错在哪；
+4. 最后校准难度与选项字数，确认正确项没有明显更长。
+**不要把推理过程写进输出，只输出 JSON。**
 
 【题型规范】
 - 单选题：4 个选项，只有一个最符合要求；不要「以上都对」这类废选项。
@@ -194,6 +342,7 @@ GEN_SYS = """你是考研 311 教育学专业基础的命题专家，严格依�
 - 每道题都要给出采分点（claim 核心论断 + evidence 判分依据），主观题 4-6 个。
   **辨析题的第 1 个采分点必须是「判断正误」**（写「该说法错误：……」或「该说法正确：……」）——
   官方判分是两层：判断正误 3 分（判断错则全题不超过 3 分）+ 阐明理由 12 分。
+- 客观题与主观题都要自评 `difficulty`（1–5 的整数），并贴住上面给定的难度档位。
 - 严禁照抄历年真题原题；可参考风格，但必须改变情境与设问。
 - 输出纯 JSON，不要解释文字。
 """
@@ -271,21 +420,51 @@ def shuffle_options(q):
     return q
 
 
-def generate_questions(points, n_single=20, n_analysis=1, n_short=1, n_essay=1):
-    """按考点让 AI 出题。points: [{'id':..,'name':..,'path':..}]"""
+def generate_questions(points, n_single=20, n_analysis=1, n_short=1, n_essay=1,
+                       difficulty=None, thinking=True, max_attempts=2):
+    """按考点让 AI 出题。points: [{'id':..,'name':..,'path':..}]
+
+    difficulty: 1–5 难度档（None → 默认档）；thinking: 出题时是否开思考模式。
+    返回 (data, usage, audit)：audit 是程序层校验结果（难度越档 / 正确项过长 / 情境…）。
+
+    为什么这里也要重出一轮：「难度要贴合档位」「正确项不许明显更长」这两条
+    **靠提示词约束不住**（模型自评与提示词都不够可靠），必须程序层判定后
+    带着问题清单重出 —— 与「全 AI 模拟组」用的是同一套机制。
+    """
+    difficulty = normalize_difficulty(difficulty)
+    lim = gen_limits(thinking)
     plist = "\n".join(f"{p['id']}\t{p.get('path') or p.get('name')}" for p in points)
-    user = GEN_USER.format(
-        points=plist, n_single=n_single, n_analysis=n_analysis,
-        n_short=n_short, n_essay=n_essay,
-    )
-    data, usage = chat_json(
-        [{"role": "system", "content": GEN_SYS}, {"role": "user", "content": user}],
-        max_tokens=8000,
-        temperature=0.6,
-    )
-    for q in data.get("single", []):
-        shuffle_options(q)
-    return data, usage
+    sys_prompt = GEN_SYS.replace("@@DIFFICULTY@@", difficulty_block(difficulty))
+
+    data, audit, usage_total = None, None, {}
+    for attempt in range(1, max_attempts + 1):
+        feedback = ""
+        if audit and audit["hard_fail"]:
+            lines = [f"- [{i['type']}] {i['target']}：{i['detail']}"
+                     for i in audit["issues"][:6]]
+            feedback = ("\n\n【上一轮被判不合格，必须避免下列问题后重新命题（不要只改几个字）】\n"
+                        + "\n".join(lines))
+        user = GEN_USER.format(
+            points=plist, n_single=n_single, n_analysis=n_analysis,
+            n_short=n_short, n_essay=n_essay,
+        ) + feedback
+        data, usage = chat_json(
+            [{"role": "system", "content": sys_prompt}, {"role": "user", "content": user}],
+            max_tokens=lim["points"],
+            temperature=0.6 + 0.1 * (attempt - 1),
+            thinking=thinking,
+            timeout=lim["timeout"],
+        )
+        add_usage(usage_total, usage)
+        for q in data.get("single", []):
+            shuffle_options(q)
+        audit = audit_ai_set({"single": data.get("single", []),
+                              "subjective": data.get("subjective", [])},
+                             difficulty=difficulty)
+        if not audit["hard_fail"]:
+            break
+    data["_audit"] = audit
+    return data, usage_total, audit
 
 
 # ---------------------------------------------------------------- ②b 全 AI 模拟组
@@ -327,9 +506,10 @@ AI_SET_SINGLE_SYS = """你是考研 311（教育学专业基础）统考的命�
 不得使用任何历年真题原题，也不得照抄真题的题干与选项。
 
 【本次任务的硬性要求】
-1. **难度对标 311 真题的偏难区间**。命题方式必须像真题：
-   - **情境化**：先给一个具体情境（教学片段、课堂对话、学校做法、研究场景、政策文本片段、
-     学者观点、实验或调查描述），再问「这体现了/属于/说明/最适合用……解释」。
+0. @@DIFFICULTY@@
+   ↑ 这是本次的难度基准：全组每道题都要贴住它，`difficulty` 自评也照它填。
+1. **情境化（任何档位都必须做到）**：先给一个具体情境（教学片段、课堂对话、学校做法、
+   研究场景、政策文本片段、学者观点、实验或调查描述），再问「这体现了/属于/说明/最适合用……解释」。
    - **严禁纯识记题**：不许出「XX 的定义是」「XX 是谁提出的」「XX 发表于哪一年」这种
      背了就会、没背就不会的题。至少要有**辨析、比较、应用、归因**这四类认知操作中的一种。
    - **反面例子（这些写法实测就是识记题，一律不要）**：
@@ -341,13 +521,21 @@ AI_SET_SINGLE_SYS = """你是考研 311（教育学专业基础）统考的命�
        选项分别对应不同理论解释，**必须理解理论才能判断哪个更贴合情境**。
    - **干扰项必须是真实的常见误解**：来自同一流派的其他观点、易混概念、常见的过度推广，
      四个选项处于同一抽象层次，不能一眼排除，也不能出现「以上都对/都错」。
+   - **情境外壳测试（必做自查）**：把情境去掉以后，如果退化成「某人的主张是什么」
+     「XX 的定义/特点是什么」这种**人物—主张配对或背标签题**，那它就是**披着情境外壳的识记题**，
+     必须重新设计。实测反例（真实生成里被质检点名的写法，一律不要）：
+     ✗「一位教师受到裴斯泰洛齐的启发，先让儿童数物品、画线条、说单词……问这体现了裴斯泰洛齐的什么思想？」
+     ✗「一位教师不预设行为目标、围绕有争议议题组织课程……问这属于哪种课程开发模式？」
+     ✓ 情境里的**具体条件必须参与判断**（谁做了什么、出现了什么结果、哪一点与理论相冲突），
+       让人"背得出理论定义"仍然不足以作答。
+   - **正确项不得明显比其他选项长或"更全面"**：四个选项字数要接近（正确项与其余三项的
+     平均字数差控制在 10 字以内）。**这一条有程序层校验，违反会整组重出。**
    - **题干信息量足够**：一般 2–5 句；允许引用学者原话、数据、政策表述。
    - **严禁与历年真题雷同**：不许直接照搬真题里出现过的原句（如「教师可以少教，学生可以多学」
      「大自然希望儿童在成人以前就要像儿童的样子」这类被反复考的句子），
      也不要复刻真题的设问方式；要换角度、换情境、换设问。
 2. **主题统一**：全部围绕用户给出的「今日学习内容」所覆盖的考点来出，不要跑到别的板块。
-   **识记题占比不得超过 20%（20 道里最多 4 道）**：教育史与教育思想史类主题难免涉及史实，
-   但绝大多数题目必须包装成情境判断，让"背过标签"不足以作答。
+   识记题比例**按上面的难度档位执行**（档位里写了上限），超过上限会被判不合格。
 3. 每题必须给出 `explain`（解析）：说清正确项为什么对、**至少两个干扰项为什么错**。
    **绝对禁止在解析里写「A/B/C/D 项」「故选 B」这类字母引用** —— 因为出题后系统会重新打乱
    选项顺序，字母会对不上（踩过：解析写「故 B 正确」而答案已变成 C）。
@@ -379,7 +567,9 @@ AI_SET_SUBJ_SYS = """你是考研 311（教育学专业基础）统考的命题�
 不得使用任何历年真题原题。
 
 【本次任务的硬性要求】
-1. 三道主观题主题与单选题保持一致，且**难度对标 311 真题**：考要点组织、比较分析、综合运用，
+0. @@DIFFICULTY@@
+   ↑ 主观题同样按这一档来：情境/材料的复杂度、要求的能力层次都照它。
+1. 三道主观题主题与单选题保持一致：考要点组织、比较分析、综合运用，
    不要出可以一句话答完的题。
 2. **辨析题(analysis, 15分)**：给一个**可判断正误且含陷阱**的命题
    （半对半错、概念偷换、以偏概全、把两个层次混为一谈），不能是显而易见的对或错。
@@ -426,17 +616,20 @@ AI_SET_CHECK_SYS = """你是 311 命题质量审核员。用户会给你一组�
 1. 单选里有没有**纯识记题**（背定义/人名/年份就能答）？有就列出来。
 2. 有没有**一眼排除**的劣质干扰项、或「以上都对/都错」这类废选项？
 3. 答案分布是否严重集中在某一字母（超过一半）？
-4. 主观题：辨析题是否有真陷阱；简答题是否只是一句话能答完；**论述题是否真的带材料、
+4. **每题难度是否贴住题目开头的「难度档位」？** 有没有整组偏易或偏难的？
+5. **正确项是否明显比其它三个选项更长、更"全面"**（学生不看内容、挑最长的就能蒙对）？
+6. **题干有没有真的给情境**（课堂/学校/研究/政策等具体场景），还是直接问知识点？
+7. 主观题：辨析题是否有真陷阱；简答题是否只是一句话能答完；**论述题是否真的带材料、
    且材料是否来自给定的真实热点**（若材料里出现给定热点之外的"政策名称/年份/文号"，判定为编造）。
-5. 有没有和历年真题明显雷同的题（照抄题干或选项）？
-6. 有没有题干残缺、选项缺项、采分点少于 3 个的题？
+8. 有没有和历年真题明显雷同的题（照抄题干或选项）？
+9. 有没有题干残缺、选项缺项、采分点少于 3 个的题？
 
 输出纯 JSON：
 {"pass": true/false,
- "issues": [{"type": "识记题|劣质选项|答案集中|编造热点|疑似真题|残缺", "target": "第几题/题号", "detail": "问题描述"}],
+ "issues": [{"type": "识记题|劣质选项|答案集中|难度不符|正确项过长|缺情境|编造热点|疑似真题|残缺", "target": "第几题/题号", "detail": "问题描述"}],
  "must_retry": true/false,
  "comment": "一句话总评"}
-`must_retry` 只在**必须重出**时填 true（有识记题、编造热点、残缺、或答案严重集中）。
+`must_retry` 只在**必须重出**时填 true（有识记题、编造热点、残缺、答案严重集中、难度明显不符）。
 """
 
 
@@ -481,13 +674,17 @@ def balance_answer_distribution(singles):
     return singles
 
 
-def audit_ai_set(paper):
+def audit_ai_set(paper, difficulty=None):
     """程序层硬校验（不依赖 AI 自评，这几项能确定性判定）。
 
-    为什么需要：AI 自评会漏、也会放水。下面三条都是实测踩到过的真问题：
+    为什么需要：AI 自评会漏、也会放水。下面这些条都是实测踩到过的真问题：
       ① 解析里引用选项字母（如「故 B 正确」）—— 打乱选项后字母必然对不上；
       ② 答案集中在一个字母（实测 20 题里 B 占 8 道）；
-      ③ 主观题采分点过少（无法自评）。
+      ③ 主观题采分点过少（无法自评）；
+      ④ 难度没贴住用户选的档位（自评数字越档/均值跑偏）；
+      ⑤ 正确项明显比其它选项长 —— 考生不看内容、挑最长的就能蒙对。
+
+    difficulty: 目标难度档（1–5）。给了才做难度校验。
     """
     issues = []
     singles = paper.get("single", [])
@@ -567,29 +764,100 @@ def audit_ai_set(paper):
             issues.append({"type": "辨析题缺判断项", "target": f"主观第 {i} 题",
                            "detail": f"首个采分点不是「判断正误」：{first[:24]}"})
 
+    # ⑧ 难度档位（只在指定了目标档时校验）
+    #    ⚠️ 难度是**模型自评**的，程序只能校验"它自己说的数"贴不贴档。
+    #    真正起作用的是提示词里那套可观察描述；这里只是兜底，并把分布暴露给人看。
+    diff_vals, diff_bad = [], []
+    if difficulty:
+        lo, hi = max(1, difficulty - 1), min(5, difficulty + 1)
+        for i, q in enumerate(singles, 1):
+            d = q.get("difficulty")
+            if not isinstance(d, (int, float)):
+                diff_bad.append(f"第{i}题未标难度")
+                continue
+            diff_vals.append(float(d))
+            if not (lo <= d <= hi):
+                diff_bad.append(f"第{i}题={d:g}")
+        if diff_bad:
+            issues.append({"type": "难度越档", "target": f"{len(diff_bad)} 道",
+                           "detail": f"目标档 {difficulty}（允许 {lo}–{hi}）："
+                                     + "、".join(diff_bad[:6])})
+        elif diff_vals:
+            mean = sum(diff_vals) / len(diff_vals)
+            if abs(mean - difficulty) > 0.5:
+                issues.append({"type": "难度均值偏离",
+                               "target": f"均值 {mean:.2f} / 目标 {difficulty}",
+                               "detail": "整组难度没贴住目标档（偏了超过 0.5）"})
+
+    # ⑨ 正确项明显更长/更全：学生不看内容、挑"最长最完整"的那个就能蒙对
+    long_ones = []
+    for i, q in enumerate(singles, 1):
+        opts = q.get("options") or {}
+        ans = (q.get("answer") or "").upper()
+        if len(opts) != 4 or ans not in opts:
+            continue
+        n_ans = len(str(opts[ans]).strip())
+        others = [len(str(v).strip()) for k, v in opts.items() if k != ans]
+        if not others:
+            continue
+        avg = sum(others) / len(others)
+        if avg > 0 and n_ans > avg * 1.5 and n_ans - avg > 12:
+            long_ones.append(f"第{i}题（正确项 {n_ans} 字 vs 其余均 {avg:.0f} 字）")
+    if long_ones:
+        issues.append({"type": "正确项明显过长", "target": f"{len(long_ones)} 道",
+                       "detail": "正确项比其它选项长得多，能靠形式蒙对："
+                                 + "；".join(long_ones[:4])})
+
+    # ⑩ 题干疑似缺情境 —— **只报不拦**
+    #    机器判断"有没有情境"很不可靠（本项目踩过"用一个统计指标代替真正的检查"的坑，犯过 3 次）。
+    #    所以这里用很保守的规则（题干过短、或完全没有情境标志词）只提示一句，
+    #    **不进 hard_fail**；真正的判断交给 AI 质检和用户自己看。
+    SCENE_KW = ("情境", "场景", "课堂", "课上", "班上", "班里", "学校", "某校", "教师", "老师",
+                "学生", "家长", "校长", "教学", "课程", "调查", "实验", "研究", "材料", "案例",
+                "政策", "文件", "报告", "数据", "学者", "一位", "一名", "某位", "现象")
+    scene_suspect = [f"第{i}题" for i, q in enumerate(singles, 1)
+                     if len((q.get("stem") or "").strip()) < 25
+                     or not any(k in (q.get("stem") or "") for k in SCENE_KW)]
+    if scene_suspect:
+        issues.append({"type": "疑似缺情境", "target": f"{len(scene_suspect)} 道",
+                       "detail": "题干偏短或看不出情境（粗筛，仅供参考、不触发重出）："
+                                 + "、".join(scene_suspect[:6])})
+
+    HARD_FAIL_TYPES = ("解析引用字母", "答案集中", "采分点过少", "题干过短", "选项残缺",
+                       "答案缺失", "识记题偏多", "组内重复", "辨析题缺判断项",
+                       "难度越档", "难度均值偏离", "正确项明显过长")
+    diff_dist = {}
+    for v in diff_vals:
+        diff_dist[int(v)] = diff_dist.get(int(v), 0) + 1
     return {"issues": issues, "answer_dist": dict(dist), "remember_n": n_remember,
-            "hard_fail": bool([i for i in issues if i["type"] in (
-                "解析引用字母", "答案集中", "采分点过少", "题干过短", "选项残缺",
-                "答案缺失", "识记题偏多", "组内重复", "辨析题缺判断项")])}
+            "difficulty_target": difficulty,
+            "difficulty_mean": round(sum(diff_vals) / len(diff_vals), 2) if diff_vals else None,
+            "difficulty_dist": diff_dist,
+            "scene_suspect_n": len(scene_suspect),
+            "hard_fail": bool([i for i in issues if i["type"] in HARD_FAIL_TYPES])}
 
 
-def generate_ai_set(study_text, points, n_single=20, topics=None, max_attempts=2):
+def generate_ai_set(study_text, points, n_single=20, topics=None, max_attempts=2,
+                    difficulty=None, thinking=True):
     """一次生成「全 AI 模拟组」：{n_single} 单选 + 辨析/简答/论述各 1。
+
+    difficulty: 1–5 难度档；thinking: 出题时是否开思考模式（更慢更贵，题目质量更高）。
 
     分两批调用（单选 / 主观）——合成一次调用在 20 题规模上容易截断，且失败看不出原因。
     流程：生成 → 程序层硬校验 + AI 质检 → 不合格就**带着问题重出一组**（最多 max_attempts 次）。
 
     返回 (paper, usage合计, 质检结果)；质检结果里含 attempts 与每一轮的 issues。
     """
+    difficulty = normalize_difficulty(difficulty)
+    lim = gen_limits(thinking)
+    single_sys = AI_SET_SINGLE_SYS.replace("@@DIFFICULTY@@", difficulty_block(difficulty))
+    subj_sys = AI_SET_SUBJ_SYS.replace("@@DIFFICULTY@@", difficulty_block(difficulty))
+
     plist = "\n".join(f"{p['id']}\t{p.get('path') or p.get('name')}" for p in points)
     topics = topics if topics is not None else hot_topics()
     topics_txt = "\n\n".join(f"【热点 {i+1}】{t['date']} {t['title']}\n{t['body']}"
                              for i, t in enumerate(topics)) or "（热点清单为空：请出一道经典的、不依赖时事的材料论述题）"
     usage_total = {}
-
-    def add_usage(u):
-        for k in ("prompt_tokens", "completion_tokens"):
-            usage_total[k] = usage_total.get(k, 0) + (u or {}).get(k, 0)
 
     history = []
     paper, audit, check = None, None, None
@@ -607,16 +875,18 @@ def generate_ai_set(study_text, points, n_single=20, topics=None, max_attempts=2
             study=(study_text or "（未填写，按考点清单覆盖的内容出题）") + feedback,
             points=plist, n=n_single)
         singles, u1 = chat_json(
-            [{"role": "system", "content": AI_SET_SINGLE_SYS}, {"role": "user", "content": user1}],
-            max_tokens=16000, temperature=0.7 + 0.1 * (attempt - 1))
-        add_usage(u1)
+            [{"role": "system", "content": single_sys}, {"role": "user", "content": user1}],
+            max_tokens=lim["single"], temperature=0.7 + 0.1 * (attempt - 1),
+            thinking=thinking, timeout=lim["timeout"])
+        add_usage(usage_total, u1)
 
         user2 = AI_SET_SUBJ_USER.format(
             study=(study_text or "（未填写）") + feedback, points=plist, topics=topics_txt)
         subs, u2 = chat_json(
-            [{"role": "system", "content": AI_SET_SUBJ_SYS}, {"role": "user", "content": user2}],
-            max_tokens=10000, temperature=0.7)
-        add_usage(u2)
+            [{"role": "system", "content": subj_sys}, {"role": "user", "content": user2}],
+            max_tokens=lim["subj"], temperature=0.7,
+            thinking=thinking, timeout=lim["timeout"])
+        add_usage(usage_total, u2)
 
         paper = {"single": singles.get("single", [])[:n_single],   # 只要求 20 道，多给的一律裁掉
                  "subjective": subs.get("subjective", [])}
@@ -624,24 +894,47 @@ def generate_ai_set(study_text, points, n_single=20, topics=None, max_attempts=2
             shuffle_options(q)
         balance_answer_distribution(paper["single"])               # 打乱后再均衡答案分布
 
-        audit = audit_ai_set(paper)
+        audit = audit_ai_set(paper, difficulty=difficulty)
 
         check = {"pass": None, "issues": [], "must_retry": False, "comment": "（未跑 AI 质检）"}
         try:
             check_txt = json.dumps(paper, ensure_ascii=False)[:24000]
             check, u3 = chat_json(
                 [{"role": "system", "content": AI_SET_CHECK_SYS},
-                 {"role": "user", "content": "热点清单：\n" + topics_txt[:4000] +
+                 {"role": "user", "content": "难度档位：" + difficulty_block(difficulty) +
+                                             "\n\n热点清单：\n" + topics_txt[:4000] +
                                              "\n\n待审题目：\n" + check_txt}],
-                max_tokens=2500, temperature=0.2)
-            add_usage(u3)
+                max_tokens=lim["check"], temperature=0.2,
+                thinking=thinking, timeout=lim["timeout"])
+            add_usage(usage_total, u3)
         except Exception as e:
+            # 兜底：开思考时实测出现过「推理把 max_tokens 吃光 → 正文为空 → JSON 解析失败」。
+            # 质检只是**审阅已生成好的题**，不需要那么深的推理，退一步用不开思考重跑一次，
+            # 保证这份质量报告一定拿得到（否则页面上只有一句看不懂的报错）。
             check = {"pass": None, "issues": [], "must_retry": False,
                      "comment": f"质检调用失败：{type(e).__name__}: {e}"}
+            if thinking:
+                try:
+                    check_txt = json.dumps(paper, ensure_ascii=False)[:24000]
+                    check, u3 = chat_json(
+                        [{"role": "system", "content": AI_SET_CHECK_SYS},
+                         {"role": "user", "content": "难度档位：" + difficulty_block(difficulty) +
+                                                     "\n\n热点清单：\n" + topics_txt[:4000] +
+                                                     "\n\n待审题目：\n" + check_txt}],
+                        max_tokens=lim["plain_check"], temperature=0.2,
+                        thinking=False, timeout=lim["plain_timeout"])
+                    add_usage(usage_total, u3)
+                    check["fallback_no_thinking"] = True
+                except Exception as e2:
+                    check = {"pass": None, "issues": [], "must_retry": False,
+                             "comment": f"质检两次都失败：{type(e).__name__}: {e} / "
+                                        f"关思考重试后 {type(e2).__name__}: {e2}"}
 
         all_issues = audit["issues"] + list(check.get("issues") or [])
         history.append({"attempt": attempt, "issues": all_issues,
                         "answer_dist": audit["answer_dist"],
+                        "difficulty_mean": audit.get("difficulty_mean"),
+                        "difficulty_dist": audit.get("difficulty_dist"),
                         "ai_pass": check.get("pass"), "ai_must_retry": check.get("must_retry")})
 
         # 重出判定**以程序层硬校验为准**（确定性的那几项）。
@@ -658,6 +951,11 @@ def generate_ai_set(study_text, points, n_single=20, topics=None, max_attempts=2
         "ai_check": check,
         "final_ok": not audit["hard_fail"],
         "ai_flagged": bool((check or {}).get("must_retry")),
+        # 本次的出题设置（回显给页面，也便于事后追溯"这套题是什么档位、有没有开思考"）
+        "difficulty": difficulty,
+        "difficulty_name": DIFFICULTY_LEVELS[difficulty]["name"],
+        "thinking": bool(thinking),
+        "reasoning_tokens": usage_total.get("reasoning_tokens", 0),
     }
 
 

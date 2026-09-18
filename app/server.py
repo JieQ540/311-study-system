@@ -22,11 +22,16 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 
 ROOT = Path(__file__).resolve().parents[1]   # 公开副本：相对路径
-# DSH_DB 覆盖只给测试用：把库指向副本，跑完删掉，绝不动真实数据（见 docs/交接文档.md §5.1）
-# 公开副本：优先用户自己的库，没有就用随包的种子题库（这样 clone 即能用）
-_LIVE_DB = ROOT / "data" / "kaoyan.db"
-_SEED_DB = ROOT / "data" / "kaoyan-seed.db"
-DB = Path(os.environ.get("DSH_DB") or (_LIVE_DB if _LIVE_DB.exists() else _SEED_DB))
+# 让 app/ 一定可导入：这样 `cd app && uvicorn server:app` 和
+# `uvicorn app.server:app`（从项目根）两种启动方式都能跑
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# 库的位置统一由 dbpath 决定（server 与 ai 共用，避免"服务读 A 库、AI 写 B 库"）：
+# 优先用户自己的 data/kaoyan.db；没有或不是可用的库时，从随包的 kaoyan-seed.db
+# 复制一份出来用 —— **绝不把练习记录写进被 git 跟踪的随包文件**。
+# DSH_DB 环境变量只给测试用：把库指向副本，跑完删掉，绝不动真实数据（见 docs/交接文档.md §5.1）
+from dbpath import DB  # noqa: E402
+
 STATIC = ROOT / "app" / "static"
 INDEX = STATIC / "index.html"
 
@@ -348,11 +353,14 @@ def load_paper_by_row(prow):
 
 
 @app.get("/api/paper")
-def paper(rebuild: int = 0):
+def paper(rebuild: int = 0, difficulty: int = 3, thinking: int = 1):
     """取当前试卷。
 
     默认返回**正在使用的那一份** —— 刷新页面、关掉重开都拿到同一份卷子，
     作答不会白做。只有传 rebuild=1 才归档旧卷并重新组卷。
+
+    difficulty / thinking 只影响**组卷时 AI 补的那几道题**（真题足够时用不到）。
+    模拟考试页没有设置窗口，它读的是和日常练习同一份浏览器设置（同源 localStorage）。
     """
     ensure_schema()
     if not rebuild:
@@ -386,12 +394,14 @@ def paper(rebuild: int = 0):
         if not scope:
             scope = rows("SELECT id,path FROM outline_nodes WHERE level='section' ORDER BY RANDOM() LIMIT 12")
         try:
-            gen, _ = ai_mod.generate_questions(
+            gen, _, gen_audit = ai_mod.generate_questions(
                 scope,
                 n_single=shortfall["single"],
                 n_analysis=shortfall["analysis"],
                 n_short=shortfall["short"],
                 n_essay=shortfall["essay"],
+                difficulty=difficulty,
+                thinking=bool(thinking),
             )
             con = sqlite3.connect(DB)
             try:
@@ -402,7 +412,10 @@ def paper(rebuild: int = 0):
                         ("AI生成", "single", q.get("stem", ""),
                          json.dumps(q.get("options") or {}, ensure_ascii=False),
                          q.get("answer"), q.get("outline_id"),
-                         json.dumps({"explain": q.get("explain", "")}, ensure_ascii=False)))
+                         json.dumps({"explain": q.get("explain", ""),
+                                     "difficulty": q.get("difficulty"),
+                                     "difficulty_target": difficulty,
+                                     "thinking": bool(thinking)}, ensure_ascii=False)))
                     picks["single"].append({"id": cur.lastrowid, "number": None, "qtype": "single",
                                             "stem": q.get("stem"), "options": json.dumps(q.get("options") or {}, ensure_ascii=False),
                                             "answer": q.get("answer"), "outline_id": q.get("outline_id"),
@@ -959,14 +972,35 @@ def daily_parse(payload: dict):
     }
 
 
+@app.get("/api/daily/gen-options")
+def gen_options():
+    """出题设置的可选项（难度五档 + 默认值），供页面渲染设置窗口。
+
+    为什么走接口、而不是把五档说明写死在 HTML 里：**单一事实来源**。
+    档位描述就是提示词里实际用的那一套（`ai.DIFFICULTY_LEVELS`）；
+    在页面上再复述一份，迟早会和提示词对不上 —— 那时用户看到的档位说明就是假的。
+    """
+    return {
+        "ok": True,
+        "levels": {str(k): v for k, v in ai_mod.DIFFICULTY_LEVELS.items()},
+        "default_difficulty": ai_mod.DEFAULT_DIFFICULTY,
+        "default_thinking": True,
+    }
+
+
 @app.post("/api/daily/generate")
 def daily_generate(payload: dict):
-    """② 按确认后的考点出题：真题优先，不足用 AI 补。"""
+    """② 按确认后的考点出题：真题优先，不足用 AI 补。
+
+    difficulty / thinking 作用于**AI 补的那部分**（真题抽够时用不到）。
+    """
     ids = payload.get("point_ids") or []
     n_single = int(payload.get("n_single", 20))
     n_analysis = int(payload.get("n_analysis", 1))
     n_short = int(payload.get("n_short", 1))
     n_essay = int(payload.get("n_essay", 1))
+    difficulty = ai_mod.normalize_difficulty(payload.get("difficulty"))
+    thinking = bool(payload.get("thinking", True))
     if not ids:
         return {"ok": False, "error": "未指定考点"}
 
@@ -984,16 +1018,27 @@ def daily_generate(payload: dict):
     need_single = max(0, n_single - len(real["single"]))
     need_subj = max(0, (n_analysis + n_short + n_essay) - len(real["subjective"]))
 
-    generated, usage = {"single": [], "subjective": []}, None
+    generated, usage, gen_audit = {"single": [], "subjective": []}, None, None
     if need_single or need_subj:
         # 按缺口比例分配主观题类型
-        generated, usage = ai_mod.generate_questions(
-            points,
-            n_single=need_single,
-            n_analysis=max(0, n_analysis - sum(1 for s in real["subjective"] if s["qtype"] == "analysis")),
-            n_short=max(0, n_short - sum(1 for s in real["subjective"] if s["qtype"] == "short")),
-            n_essay=max(0, n_essay - sum(1 for s in real["subjective"] if s["qtype"] == "essay")),
-        )
+        try:
+            generated, usage, gen_audit = ai_mod.generate_questions(
+                points,
+                n_single=need_single,
+                n_analysis=max(0, n_analysis - sum(1 for s in real["subjective"] if s["qtype"] == "analysis")),
+                n_short=max(0, n_short - sum(1 for s in real["subjective"] if s["qtype"] == "short")),
+                n_essay=max(0, n_essay - sum(1 for s in real["subjective"] if s["qtype"] == "essay")),
+                difficulty=difficulty,
+                thinking=thinking,
+            )
+        except Exception as e:
+            # 真题不够、又没配好 AI 时会走到这里（刚 clone、还没填 key 就是这种状态）。
+            # 这里以前没有兜底，ConfigMissing 会直接冒泡成 HTTP 500，
+            # 前端拿不到 error 字段，只能显示「失败: undefined」。
+            return {"ok": False,
+                    "error": f"这几个考点的真题不够，需要用 AI 补题，但 AI 现在不可用："
+                             f"{type(e).__name__}: {e}",
+                    "real_count": used_real}
         # 生成的题必须入库：否则没有 id，无法批改、无法记录成绩
         con = sqlite3.connect(DB)
         try:
@@ -1004,7 +1049,11 @@ def daily_generate(payload: dict):
                     (None, "AI生成", "single", None, q.get("stem", ""),
                      json.dumps(q.get("options") or {}, ensure_ascii=False),
                      q.get("answer"), q.get("outline_id"),
-                     json.dumps({"explain": q.get("explain", "")}, ensure_ascii=False)),
+                     json.dumps({"explain": q.get("explain", ""),
+                                 "cognitive": q.get("cognitive"),
+                                 "difficulty": q.get("difficulty"),
+                                 "difficulty_target": difficulty,
+                                 "thinking": thinking}, ensure_ascii=False)),
                 )
                 q["id"] = cur.lastrowid
             for q in generated.get("subjective", []):
@@ -1012,7 +1061,10 @@ def daily_generate(payload: dict):
                     "INSERT INTO questions (year,source,qtype,number,stem,extra,outline_id) "
                     "VALUES (?,?,?,?,?,?,?)",
                     (None, "AI生成", q.get("qtype", "short"), None, q.get("stem", ""),
-                     json.dumps({"full_score": q.get("full_score", 15)}, ensure_ascii=False),
+                     json.dumps({"full_score": q.get("full_score", 15),
+                                 "difficulty": q.get("difficulty"),
+                                 "difficulty_target": difficulty,
+                                 "thinking": thinking}, ensure_ascii=False),
                      q.get("outline_id")),
                 )
                 qid = cur.lastrowid
@@ -1031,16 +1083,30 @@ def daily_generate(payload: dict):
         "generated_count": len(generated.get("single", [])) + len(generated.get("subjective", [])),
         "paper": {"real": real, "generated": generated},
         "usage": usage,
+        # 回显本次出题设置与程序层校验结果（页面用它显示"难度是否达标"）
+        "gen_settings": {"difficulty": difficulty,
+                         "difficulty_name": ai_mod.DIFFICULTY_LEVELS[difficulty]["name"],
+                         "thinking": thinking},
+        "gen_audit": gen_audit,
     }
 
 
-def _insert_ai_questions(generated, strict_points=True):
+def _insert_ai_questions(generated, strict_points=True, difficulty=None, thinking=None):
     """把 AI 生成的题写库（单选带解析；主观题连采分点），返回入库后的对象。
 
     为什么要入库：没有 id 就无法批改、无法记录成绩、无法算薄弱点。
+    extra 里连**目标难度档与是否用了思考**一起存 —— 事后翻日志/复盘时能看出
+    这套题是按什么设置出的（模型自评的 difficulty 与实际目标分开存，别混为一谈）。
     """
     con = sqlite3.connect(DB)
     out = {"single": [], "subjective": []}
+
+    def extra_of(q, base):
+        base.update({"difficulty": q.get("difficulty"),
+                     "difficulty_target": difficulty,
+                     "thinking": thinking})
+        return json.dumps(base, ensure_ascii=False)
+
     try:
         for q in generated.get("single", []):
             cur = con.execute(
@@ -1049,9 +1115,8 @@ def _insert_ai_questions(generated, strict_points=True):
                 (None, "AI生成", "single", None, q.get("stem", ""),
                  json.dumps(q.get("options") or {}, ensure_ascii=False),
                  q.get("answer"), q.get("outline_id"),
-                 json.dumps({"explain": q.get("explain", ""),
-                             "cognitive": q.get("cognitive", ""),
-                             "difficulty": q.get("difficulty")}, ensure_ascii=False)))
+                 extra_of(q, {"explain": q.get("explain", ""),
+                              "cognitive": q.get("cognitive", "")})))
             q["id"] = cur.lastrowid
             out["single"].append(q)
         for q in generated.get("subjective", []):
@@ -1062,8 +1127,7 @@ def _insert_ai_questions(generated, strict_points=True):
                 "INSERT INTO questions (year,source,qtype,number,stem,extra,outline_id) "
                 "VALUES (?,?,?,?,?,?,?)",
                 (None, "AI生成", q.get("qtype", "short"), None, q.get("stem", ""),
-                 json.dumps({"full_score": q.get("full_score", 15),
-                             "difficulty": q.get("difficulty")}, ensure_ascii=False),
+                 extra_of(q, {"full_score": q.get("full_score", 15)}),
                  q.get("outline_id")))
             qid = cur.lastrowid
             q["id"] = qid
@@ -1099,10 +1163,13 @@ def daily_ai_set(payload: dict):
     用来练真题还没覆盖到的角度；且最后一题论述题必须带材料、取材于真实政策热点。
 
     payload.user_text 给了就自己解析考点（不用先走 /parse）；也可直接传 point_ids。
+    payload.difficulty（1–5）与 payload.thinking（默认 true）控制出题时的难度档与思考模式。
     """
     text = (payload.get("user_text") or "").strip()
     ids = payload.get("point_ids") or []
     n_single = int(payload.get("n_single", 20))
+    difficulty = ai_mod.normalize_difficulty(payload.get("difficulty"))
+    thinking = bool(payload.get("thinking", True))
     parse_error = None
 
     if not ids and text:
@@ -1140,7 +1207,9 @@ def daily_ai_set(payload: dict):
 
     topics = ai_mod.hot_topics()
     try:
-        paper, usage, check = ai_mod.generate_ai_set(text, points, n_single=n_single, topics=topics)
+        paper, usage, check = ai_mod.generate_ai_set(
+            text, points, n_single=n_single, topics=topics,
+            difficulty=difficulty, thinking=thinking)
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
@@ -1150,7 +1219,7 @@ def daily_ai_set(payload: dict):
         saved = {"single": [dict(q, id=None) for q in paper["single"]],
                  "subjective": [dict(q, id=None) for q in paper["subjective"]]}
     else:
-        saved = _insert_ai_questions(paper)
+        saved = _insert_ai_questions(paper, difficulty=difficulty, thinking=thinking)
 
     # 做题前的自检报告：程序层硬校验（不信 AI 自评）+ AI 质检 + 重出记录
     from collections import Counter
@@ -1186,6 +1255,14 @@ def daily_ai_set(payload: dict):
             for h in ((check or {}).get("history") or [])
         ],
         "ai_check": (check or {}).get("ai_check") or {},
+        # 本次出题设置 + 难度达成情况（页面靠它显示"难度有没有贴住你选的档"）
+        "difficulty": difficulty,
+        "difficulty_name": ai_mod.DIFFICULTY_LEVELS[difficulty]["name"],
+        "thinking": thinking,
+        "reasoning_tokens": (usage or {}).get("reasoning_tokens", 0),
+        "difficulty_mean": audit.get("difficulty_mean"),
+        "difficulty_dist": audit.get("difficulty_dist") or {},
+        "scene_suspect_n": audit.get("scene_suspect_n", 0),
     }
     if payload.get("mark_topics", True):
         try:
@@ -1244,11 +1321,13 @@ def daily_weak_paper(payload: dict):
     ids = [x["oid"] for x in picked]
     label = "、".join(x["name"][:14] for x in picked[:3])
 
-    # 复用 generate 的组卷逻辑
+    # 复用 generate 的组卷逻辑（难度/思考设置一并透传：这条路也是 AI 补题）
     inner = daily_generate({
         "point_ids": ids,
         "n_single": n_single, "n_analysis": n_analysis,
         "n_short": n_short, "n_essay": n_essay,
+        "difficulty": payload.get("difficulty"),
+        "thinking": payload.get("thinking", True),
     })
     inner["focus"] = [
         {"name": x["name"], "path": x["path"], "rate": x["rate"],

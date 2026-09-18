@@ -30,7 +30,7 @@
 | 页面 | 路径 | 做什么 |
 | --- | --- | --- |
 | **模拟考试** | `/` | 按 311 真实结构组卷（45 单选 + 3 辨析 + 5 简答 + 3 分析论述，含 30 分必选题），180 分钟计时，客观题自动判分；**交卷后可看每题答案与解析** |
-| **日常练习** | `/daily` | 两种入口：① 输入"今天学了什么"（自然语言）→ AI 定位考点 → 出题；② 一键**按薄弱点出题** |
+| **日常练习** | `/daily` | 两种入口：① 输入"今天学了什么"（自然语言）→ AI 定位考点 → 出题；② 一键**按薄弱点出题**。带「**出题设置**」：五档难度 + 思考模式开关（默认开，可随时关） |
 | **练习日志** | `/logs` | **按天分组**；展开某一天可看到当天做过的每一道题——题干、你的作答、批改情况（客观题对错 + 主观题采分点逐点命中 / AI 批改），并可直接生成或跳转该次的 AI 复盘 |
 | **学习复盘** | `/reports` | 每次练习生成一份**基于数据**的 AI 学习报告（得分/失分考点/趋势/下一步），并画正确率趋势图；每条都能跳回练习日志看**这次到底做了哪些题** |
 | **薄弱点分析** | 各页入口 | 客观题对错 + 主观题采分点命中，按大纲考点聚合排序 |
@@ -90,6 +90,8 @@ attempts（客观题对错）  ┘
 
 ### 依赖
 
+需要 **Python 3.10 或更高版本**（Windows 安装时记得勾选 `Add python.exe to PATH`）。
+
 ```bash
 pip install fastapi "uvicorn[standard]"
 ```
@@ -101,6 +103,8 @@ pip install fastapi "uvicorn[standard]"
 
 ```bash
 # Windows：双击 启动系统.bat
+#   —— 它会自己检查 Python 和依赖：缺依赖自动装（约 1 分钟），缺 Python 会告诉你装哪个；
+#      并且等端口真的起来了才打开浏览器，不会让你先看到一个「无法访问」的页面。
 # 或命令行：
 cd app
 python -m uvicorn server:app --host 127.0.0.1 --port 8765
@@ -108,8 +112,19 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8765
 
 打开 <http://127.0.0.1:8765> 即可开始做题。
 
-**服务怎么找到题库**：优先用 `data/kaoyan.db`；没有就自动用随包的 `data/kaoyan-seed.db`。
-你想从零重建自己的库时，第一次写库会自动生成 `data/kaoyan.db` 并覆盖优先级。
+**服务怎么找到题库**（逻辑集中在 `app/dbpath.py`，启动时决定一次）：
+
+1. 有 `data/kaoyan.db` 且**里面真的有表** → 用它（你的作答记录都在这里）；
+2. 没有、或那个文件不是可用的库（0 字节 / 损坏 / 建表中途失败）→ 把随包的
+   `data/kaoyan-seed.db` **复制**出一份 `data/kaoyan.db` 再用它；
+   原文件非空时会先备份成 `data/kaoyan.db.bak-<时间戳>`，不会静默删掉你的东西。
+
+> 为什么不是「直接用 seed 库」：`kaoyan-seed.db` 是**被 git 跟踪**的随包文件。
+> 把练习记录写进去，会让 `git checkout .` / 重新 clone / `git stash` **静默抹掉
+> 全部学习历史**，以后 `git pull` 也必然冲突。所以你自己的数据一律进 `kaoyan.db`
+> （已 gitignore，可直接拷走备份）。
+>
+> 测试用途可以用环境变量 `DSH_DB` 把库指到临时副本上，此时不会复制任何文件。
 
 ### 配置（可选，只有 AI 功能需要）
 
@@ -172,7 +187,7 @@ python extract_subjective_answer.py  # 主观题参考答案 → extra.answer_te
 ┌────────▼────────┐      ┌─────────▼──────────┐
 │ data/kaoyan.db  │      │ app/ai.py          │
 │ SQLite 单文件    │      │ 读 config.json     │
-│ 8 表 + 3 视图    │      │ → DeepSeek API     │
+│ 9 表 + 3 视图    │      │ → DeepSeek API     │
 └─────────────────┘      └────────────────────┘
 ```
 
@@ -180,8 +195,9 @@ python extract_subjective_answer.py  # 主观题参考答案 → extra.answer_te
 
 | 文件 | 职责 | 依赖 |
 | --- | --- | --- |
-| `server.py` | 全部 HTTP 接口；业务逻辑与 SQL | SQLite、`ai.py` |
+| `server.py` | 全部 HTTP 接口；业务逻辑与 SQL | SQLite、`ai.py`、`dbpath.py` |
 | `ai.py` | 封装 AI 调用（三个业务函数 + JSON 容错） | `config.json`、DeepSeek API |
+| `dbpath.py` | 决定读写哪个库（用户库 / 随包 seed 的复制） | 无 |
 | `build_db.py` 等 | 数据管线（离线跑，不参与运行时） | 无 |
 | `static/*.html` | 界面（各自独立，共用同一套接口） | 无 |
 
@@ -237,7 +253,7 @@ UNION ALL ─▶ JOIN outline_nodes ─▶ GROUP BY 节点 ─▶ 命中率升�
 
 ## 5. 数据模型
 
-SQLite 单文件（随包的 `data/kaoyan-seed.db` 或你自己的 `data/kaoyan.db`），8 张表 + 3 个视图。
+SQLite 单文件（随包的 `data/kaoyan-seed.db` 或你自己的 `data/kaoyan.db`），9 张表 + 3 个视图。
 
 ### outline_nodes — 大纲骨架
 
@@ -300,6 +316,12 @@ SQLite 单文件（随包的 `data/kaoyan-seed.db` 或你自己的 `data/kaoyan.
 
 `session_id` / `date` / `mode` / `content`（AI 生成的 Markdown 报告）/ `metrics`（当次量化快照 JSON）。
 
+### seed_meta — 随包题库的元信息
+
+两列键值表（`k` / `v`），**只有 `kaoyan-seed.db` 里有**：生成时间、来源，以及各项数量
+（`questions` 1057 / `real_questions` 1001 / `points` 912 / `outline_nodes` 637）。
+用来核对"这个包里的题库是不是完整的"，运行时不读它。
+
 ### 三个视图（防止"查询漏过滤"这类静默错误）
 
 | 视图 | 作用 |
@@ -317,7 +339,7 @@ SQLite 单文件（随包的 `data/kaoyan-seed.db` 或你自己的 `data/kaoyan.
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/` `/daily` `/logs` `/reports` | 四个页面 |
-| GET | `/api/paper` | 取当前试卷（无 active 则新组一份） |
+| GET | `/api/paper` | 取当前试卷（无 active 则新组一份）。`difficulty` / `thinking` 查询参数只影响**组卷时 AI 补的那几道** |
 | POST | `/api/save` | 提交作答：判分 + 写记录 + 写日志（主观题可带 `answer_text` 作答原文与 AI 批改 `grade`） |
 | GET | `/api/weakness` | 薄弱点排名（客观题 + 主观题合并统计） |
 | GET | `/api/logs` | 练习日志：**按天分组**（`days[]`，每天含各组练习、未归属作答、当天汇总） |
@@ -326,9 +348,11 @@ SQLite 单文件（随包的 `data/kaoyan-seed.db` 或你自己的 `data/kaoyan.
 | GET | `/api/reports` | 报告列表 + 总体趋势 |
 | DELETE | `/api/reports/{id}` | 删报告（不动作答与日志） |
 | POST | `/api/ai/test` | AI 连通性自检 |
+| GET | `/api/daily/gen-options` | 出题设置的可选项（五档难度的名称与命题要求、默认档）——档位说明**与提示词同源**，页面不另写一份 |
 | POST | `/api/daily/parse` | 学习记录 → 候选考点 |
-| POST | `/api/daily/generate` | 按指定考点出题 |
-| POST | `/api/daily/weak-paper` | 按薄弱点出题 |
+| POST | `/api/daily/generate` | 按指定考点出题（真题优先；接受 `difficulty` 1–5 与 `thinking`） |
+| POST | `/api/daily/weak-paper` | 按薄弱点出题（同样接受 `difficulty` / `thinking`） |
+| POST | `/api/daily/ai-set` | **全 AI 模拟组**（20 单选 + 3 主观，刻意不用真题；接受 `difficulty` / `thinking`，返回成组质量自检报告） |
 | POST | `/api/daily/grade` | 主观题批改（文本或图片） |
 
 ---
@@ -386,9 +410,43 @@ SQLite 单文件（随包的 `data/kaoyan-seed.db` 或你自己的 `data/kaoyan.
 
 早期版本分子来自 `point_hits`（只记命中）、分母来自 `points`（全部采分点），两边口径不同，**出现过 `2/1 = 200%` 这种不可能的结果**。
 
-### 8.3 思考模式默认关闭
+### 8.3 思考模式：批改一直开着，出题默认开但你能随时关
 
-实测同一个问题：开启思考输出 **44 tokens**，关闭只需 **1 token**，而思考 token 按输出计费（4 元/百万）。所以 `config.json` 里 `thinking: "disabled"`，只在批改主观题时由代码单独开启。
+实测同一个问题：开启思考输出 **44 tokens**，关闭只需 **1 token**，而思考 token 按输出计费（4 元/百万）。
+所以早期把 `config.json` 的 `thinking` 设成 `"disabled"`，只在批改主观题时由代码单独开启。
+
+**出题链路现在默认开思考**（`/daily` 的「出题设置」里可随时关），因为它对题目质量的影响是实测可见的。
+代价（真实生成实测，难度档 4、一套 20 单选 + 3 主观）：
+
+| | 开思考 | 关思考 |
+| --- | --- | --- |
+| 输出 tokens | 26000–29000（**其中推理占约 70%**） | 约 8000 |
+| 耗时 | 2.2–2.6 分钟 | 1–3 分钟 |
+| 花费 | **0.11–0.13 元 / 套** | 0.04–0.05 元 / 套 |
+
+⚠️ **开思考必须同时放宽 token 预算**，否则会以"JSON 解析失败"的形式坏掉（推理也算 completion）：
+单选出题 16000 → 32000、主观题 10000 → 20000、**质检 2500 → 12000**，请求超时 180 → 600 秒。
+这些都在 `config.json` 的 `generate` 段里可调。质检还加了兜底：**失败就自动关思考重跑一次**
+（质检只是审阅已生成好的题，不需要那么深的推理）。
+
+> 质检那条预算是真实生成第二轮才炸出来的：4000 全被推理吃光、正文返回空串。
+> 第一轮 4000 够用、第二轮就不够 —— 预算类问题只会以"看不懂的报错"出现，必须真跑才看得见。
+
+### 8.3.1 难度档：靠提示词的可观察描述，程序只做兜底校验
+
+「难度」写成"难一点/简单一点"，模型基本无感。所以五档难度（偏易 / 中等 / 对标真题 / 偏难 / 极难）
+每档都给**可观察的命题特征**——情境复杂度、需要几步推理、干扰项来自哪里、识记题上限——
+再让模型自评 `difficulty`（1–5）。
+
+程序层**能**确定性校验的只有两件：① 自评难度有没有贴住目标档（越档/均值偏离就带着问题重出）；
+② **正确项不得明显比其它选项长**（否则学生不看内容、挑最长的就能蒙对）。
+
+实测教训（两次真实生成对比）：模型会给全部 20 道都打"难度 4"，但 AI 质检指出其中近半是
+**换了情境外壳的识记题**——"一位教师受到 X 的启发……问这体现了 X 的什么思想"，
+去掉情境就是"X 的思想是什么"，换个壳而已。现已把这条写成提示词里的硬规则「**情境外壳测试**」：
+**情境里的具体条件必须参与判断**，让人"背得出理论定义"仍然不足以作答。
+
+结论：**模型自评的难度不是质量证明**。页面上会把难度分布一并显示给你，最终仍需人眼看题。
 
 ### 8.4 判断 PDF 质量不能只看单一指标
 
@@ -418,6 +476,7 @@ SQLite 单文件（随包的 `data/kaoyan-seed.db` 或你自己的 `data/kaoyan.
 app/
 ├── server.py               FastAPI：全部接口 + 建表/迁移/视图
 ├── ai.py                   AI 客户端：解析记录 / 出题 / 批改 / 复盘
+├── dbpath.py               决定读写哪个库（用户库 / 从 seed 复制一份出来）
 ├── build_db.py             建库 + 导入大纲骨架
 ├── ingest_years.py         各年真题【单选】入库
 ├── ingest_subjective.py    各年真题【主观题】入库 + 拆采分点
@@ -433,8 +492,8 @@ app/
 │   └── reports.html        学习复盘
 └── tests/                  回归测试
 
-data/kaoyan-seed.db         随包题库（1075 项，无个人数据、无解析长文）
-data/kaoyan.db              你自己的库（首次写库时自动生成，已 gitignore）
+data/kaoyan-seed.db         随包题库：637 大纲节点 + 1057 题 + 912 采分点（无个人数据、无解析长文）
+data/kaoyan.db              你自己的库（首次启动自动从 seed 生成，已 gitignore；练习记录都写这里）
 source/
 ├── 骨架.md                 大纲层级
 ├── 真题库/真题/            18 年真题【题干】文本

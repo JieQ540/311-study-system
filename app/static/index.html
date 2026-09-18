@@ -138,7 +138,20 @@ function revealSubjAnswers() {
   document.querySelectorAll('#subjectives details.qans').forEach(d => { d.hidden = false; });
 }
 
-async function boot(doRebuild) {  const r = await fetch('/api/paper' + (doRebuild ? '?rebuild=1' : ''));
+// 出题设置与 /daily 共用同一个 localStorage 键（同源）：
+// 这一页只有「45 道里真题不够时 AI 补的那几道」受它影响，所以不在这里放设置窗口，
+// 但组卷时会读你上次在 /daily 选的难度档与思考开关。
+function genSettingsQS() {
+  try {
+    const s = JSON.parse(localStorage.getItem('qa_gen_settings') || 'null') || {};
+    const d = parseInt(s.difficulty) || 3;
+    return `difficulty=${d}&thinking=${s.thinking === false ? 0 : 1}`;
+  } catch (e) { return 'difficulty=3&thinking=1'; }
+}
+
+async function boot(doRebuild) {
+  const qs = genSettingsQS();
+  const r = await fetch('/api/paper' + (doRebuild ? '?rebuild=1&' + qs : '?' + qs));
   PAPER = await r.json();
   window.__PAPER_ID = PAPER.paper_id;   // 暴露给调试与自动化测试（let 不会挂到 window 上）
 
