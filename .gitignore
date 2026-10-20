@@ -1,5 +1,6 @@
 # ===== 敏感信息（绝对不要上传）=====
 config.json
+config.local.json
 *.key
 .env
 
@@ -13,6 +14,7 @@ data/*.db-shm
 data/*.bak*
 source/学习记录.md
 source/_shots/
+source/catalog_cache.json
 source/pages/
 source/pages_*/
 

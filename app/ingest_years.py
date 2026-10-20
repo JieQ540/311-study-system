@@ -212,8 +212,7 @@ def main():
         have = sum(1 for q in qs if q.get("answer"))
         print(f"  已入库 {len(qs)} 道（其中有答案 {have} 道）")
 
-    cost = total_in / 1e6 * 1 + total_out / 1e6 * 4
-    print(f"\nAI 用量: {total_in}/{total_out} tokens  ≈ {cost:.4f} 元")
+    print(f"\nAI 用量: {ai.usage_line(total_in, total_out)}")
     tot = con.execute("SELECT COUNT(*), COUNT(DISTINCT year) FROM questions WHERE source LIKE '%真题%'").fetchone()
     print(f"题库真题总数: {tot[0]} 道，覆盖年份 {tot[1]} 个")
     con.close()

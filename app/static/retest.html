@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>间隔复测 · 311 备考系统</title>
+<link rel="stylesheet" href="/static/app-ui.css">
+<link rel="stylesheet" href="/static/review.css">
+<link rel="stylesheet" href="/static/retest.css">
+<script src="/static/app-shell.js" defer></script>
+</head>
+<body data-page="reports">
+<header class="app-header"><nav class="app-nav" data-app-nav aria-label="主要导航">311 备考系统</nav></header>
+<main>
+  <div class="page-hero"><p class="eyebrow">间隔复测</p><h1>先独立作答，再核对结果</h1>
+    <p class="intro">请先完成这一次作答。提交原答后才显示参考答案、采分点与批改入口。</p></div>
+  <p id="retestStatus" class="notice" role="status" aria-live="polite"></p>
+  <section id="retestPage" class="card">正在读取本轮复测…</section>
+  <p><a href="/reports">返回学习复盘</a></p>
+</main>
+<script src="/static/qa-answer.js"></script>
+<script src="/static/retest.js"></script>
+</body></html>

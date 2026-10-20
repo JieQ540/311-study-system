@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>311 · AI 模型与参数</title>
+<style>
+  .fld { display:flex; flex-direction:column; gap:3px; }
+  .fld label { font-size:12px; color:var(--muted); }
+  input[type=text], input[type=number], input[type=password], select, textarea {
+    font-size:13px; padding:5px 8px; border:1px solid var(--line); border-radius:6px;
+    font-family:inherit; background:#fff; color:var(--ink); min-width:150px; }
+
+  .tag.ok { background:#e8f5ec; color:var(--ok); }
+  .tag.bad { background:#fdecec; color:var(--bad); }
+  .tag.warn { background:#fdf3e7; color:var(--warn); }
+  .tag.gray { background:#f5f5f5; color:#666; }
+
+  .mono { font-family:Consolas,Menlo,monospace; font-size:12px; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; font-size:13px; }
+  .kv .k { color:var(--muted); }
+  .msg { font-size:13px; padding:8px 12px; border-radius:6px; margin:8px 0; white-space:pre-wrap; }
+  .msg.ok { background:#e8f5ec; color:#22543d; }
+  .msg.bad { background:#fdecec; color:#822727; }
+  .msg.warn { background:#fdf3e7; color:#7b341e; }
+  .msg.info { background:#eef3f8; color:#2a4365; }
+  ul.warnlist { margin:6px 0 0; padding-left:20px; font-size:13px; color:#7b341e; }
+  ul.warnlist li { margin-bottom:4px; }
+  .scn { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:10px;
+         background:#fcfcfd; }
+  .scn h3 { margin:0 0 2px; font-size:14px; }
+  .scn .desc { color:var(--muted); font-size:12px; margin-bottom:8px; }
+  .grid3 { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:8px; }
+  .out { background:#1a202c; color:#e2e8f0; border-radius:6px; padding:10px 12px; font-size:12px;
+         font-family:Consolas,Menlo,monospace; white-space:pre-wrap; overflow-x:auto;
+         margin-top:8px; }
+  .out:empty { display:none; }
+  .pick { cursor:pointer; }
+  tr.picked { background:#eef3f8; }
+  .sticky-actions { position:sticky; bottom:0; background:#fff; border-top:1px solid var(--line);
+                    padding:10px 18px; margin:18px -18px -18px; display:flex; gap:10px;
+                    align-items:center; flex-wrap:wrap; }
+  .sticky-actions .grow { flex:1; }
+</style>
+<link rel="stylesheet" href="/static/app-ui.css">
+<script src="/static/app-shell.js" defer></script>
+</head>
+<body data-page="settings">
+<header class="app-header"><nav class="app-nav" data-app-nav aria-label="主要导航">311 备考系统</nav></header>
+
+<main>
+  <div class="page-hero">
+    <p class="eyebrow">AI 设置</p>
+    <div class="page-heading-row"><h1>AI 模型与参数</h1></div>
+    <p class="intro">查看当前状态，调整出题与批改参数。所有改动仍需显式保存。</p>
+  </div>
+
+  <div id="msgs"></div>
+
+  <div class="card">
+    <h2>当前状态</h2>
+    <div class="sub">这里显示的就是<b>现在生效</b>的东西：改完保存后不用重启服务。</div>
+    <div class="kv" id="now"></div>
+    <div id="authbox" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card">
+    <h2>模型目录</h2>
+    <div class="sub" id="catnote">…</div>
+    <table>
+      <thead><tr><th>模型</th><th>上下文</th><th>能力</th><th>官方价（元/百万 tokens）</th><th></th></tr></thead>
+      <tbody id="models"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>可调参数</h2>
+    <div class="sub">只列出真正影响调用行为的项。改动保存后写进覆盖层，<b>下一次调用即生效</b>。</div>
+    <div class="row">
+      <div class="fld"><label>模型</label><input type="text" id="p_model" list="modellist" style="min-width:200px"></div>
+      <datalist id="modellist"></datalist>
+      <div class="fld"><label>temperature</label><input type="number" id="p_temp" step="0.1" min="0" max="2"></div>
+      <div class="fld"><label>超时（秒）</label><input type="number" id="p_timeout" min="5" max="3600"></div>
+      <div class="fld"><label>全局默认思考</label>
+        <select id="p_thinking"><option value="disabled">关闭（便宜）</option>
+          <option value="enabled">开启（贵）</option></select></div>
+      <div class="fld"><label>思考强度</label>
+        <select id="p_effort"><option value="">（不指定，用官方默认 high）</option>
+          <option value="low">low</option><option value="high">high</option>
+          <option value="max">max</option></select></div>
+    </div>
+    <div class="msg info" style="margin-top:10px" id="tempnote"></div>
+    <div class="row" style="margin-top:10px">
+      <div class="fld"><label>base_url</label><input type="text" id="p_base" style="min-width:260px"></div>
+      <div class="fld"><label>替换 API key（留空=不改；只写进覆盖层）</label>
+        <input type="password" id="p_key" placeholder="sk-…" style="min-width:240px"></div>
+      <button class="btn ghost" id="btn_clearkey">清除覆盖层里的密钥</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>价目</h2>
+    <div class="sub" id="pricenote">…</div>
+    <div id="pricetable"></div>
+    <div class="row" style="margin-top:10px">
+      <div class="fld"><label>覆盖：输入（元/百万）</label><input type="number" id="pr_in" step="0.01" min="0"></div>
+      <div class="fld"><label>输出（元/百万）</label><input type="number" id="pr_out" step="0.01" min="0"></div>
+      <div class="fld"><label>缓存命中输入（可留空）</label><input type="number" id="pr_hit" step="0.01" min="0"></div>
+      <div class="fld"><label>生效日期</label><input type="text" id="pr_date" placeholder="2026-10-08"></div>
+      <button class="btn ghost" id="btn_clearprice">清掉覆盖，改用官方表</button>
+    </div>
+    <div class="muted" style="margin-top:8px">
+      高峰时段（北京时间，周一至周五）：
+      <span id="peakhours" class="mono"></span>。
+      高峰价是空闲价的 2 倍；工作日的其余时段、周末与法定节假日按空闲价。
+      节假日名单程序算不出来，要精确就填下面两行。
+    </div>
+    <div class="row" style="margin-top:8px">
+      <div class="fld" style="flex:1"><label>节假日日期（YYYY-MM-DD，逗号分隔）</label>
+        <input type="text" id="p_offpeak" style="min-width:100%"></div>
+    </div>
+    <div class="row">
+      <div class="fld" style="flex:1"><label>调休上班日（即使是周末也按高峰）</label>
+        <input type="text" id="p_peak" style="min-width:100%"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>各场景的预算与超时</h2>
+    <div class="sub">开思考时推理 token 也算输出，预算不够就会把 JSON 从中间截断
+      —— 表现是"解析失败"而不是"预算不够"。所以开思考的档位要单独放宽。</div>
+    <div id="scenarios"></div>
+  </div>
+
+  <div class="card">
+    <h2>按场景试跑</h2>
+    <div class="sub">真发一次<b>极短</b>的请求，并把实际发出去的参数回显出来。
+      为什么必须真跑：配置写进去了不等于有效 —— 官方规定"思考模式下 temperature 不生效"，
+      非法 effort 会被静默忽略。只看配置回显是看不出来的。</div>
+    <div class="row">
+      <div class="fld"><label>场景</label><select id="run_scn"></select></div>
+      <div class="fld"><label>本次思考</label><select id="run_thinking">
+        <option value="">（按配置）</option><option value="true">强制开</option>
+        <option value="false">强制关</option></select></div>
+      <button class="btn" id="btn_run">试跑一次</button>
+      <button class="btn ghost" id="btn_test">测试连接</button>
+    </div>
+    <div class="out" id="runout"></div>
+  </div>
+
+  <div class="sticky-actions">
+    <button class="btn" id="btn_save">保存设置</button>
+    <button class="btn ghost" id="btn_refresh">刷新模型目录（问一次服务端）</button>
+    <span class="grow"></span>
+    <span class="muted" id="overlayinfo"></span>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  let ST = null;          // 最近一次 /api/ai/settings 的结果
+  let dirty = new Set();
+
+  function esc(s) {
+    return String(s === null || s === undefined ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function money(v) { return (v === null || v === undefined) ? '—' : String(v); }
+
+  function msg(kind, text) {
+    if (!text) return;
+    const d = document.createElement('div');
+    d.className = 'msg ' + kind;
+    d.innerHTML = text;
+    $('msgs').appendChild(d);
+  }
+  function clearMsgs() { $('msgs').innerHTML = ''; }
+
+  function mark(id) {
+    dirty.add(id);
+    showOverlay();
+  }
+
+  function showOverlay() {
+    const o = (ST && ST.overlay) || {};
+    // 路径必须**一直在**：它是"这次改动会写到哪个文件"的唯一提示，
+    // 不能被"有未保存的改动"这句挤掉（点一下模型就看不到了）。
+    $('overlayinfo').textContent = `覆盖层：${o.path || '（未知）'}${o.exists ? '' : '（还没有这个文件）'}`
+      + (dirty.size ? `｜有未保存的改动：${dirty.size} 项` : '');
+  }
+
+  async function api(method, path, body) {
+    const r = await fetch(path, {
+      method: method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined
+    });
+    let j = null;
+    try { j = await r.json(); } catch (e) { j = null; }
+    return { status: r.status, j: j || {} };
+  }
+
+  // ------------------------------------------------------------ 渲染
+  const SRC_TEXT = {
+    live: '刚问过服务端', cache: '本地缓存', bundled: '随包编目',
+    'config-only': '只有当前配置的模型'
+  };
+
+  function render() {
+    const c = ST.config || {}, a = ST.auth || {}, m = ST.model || {}, cat = ST.catalog || {};
+    const pr = ST.pricing || {};
+
+    $('now').innerHTML = [
+      ['模型', `<b>${esc(c.model)}</b>${m.name && m.name !== c.model ? '（' + esc(m.name) + '）' : ''}`],
+      ['能力', [
+        m.known === false ? '<span class="tag bad">不在目录里</span>' : '<span class="tag gray">已编目</span>',
+        m.vision ? '<span class="tag ok">可读图</span>' : (m.vision === false ? '<span class="tag bad">不支持图像</span>' : '<span class="tag gray">图像能力未知</span>'),
+        m.reasoning ? `<span class="tag ok">支持思考 ${esc((m.reasoning_levels || []).join('/'))}</span>` : '<span class="tag gray">思考未知/不支持</span>'
+      ].join('')],
+      ['上下文', m.context_window ? (m.context_window / 1024).toFixed(0) + 'K tokens' : '未知'],
+      ['全局思考默认', c.thinking === 'enabled' ? '<span class="tag warn">开启</span>' : '<span class="tag gray">关闭</span>'],
+      ['思考强度', c.thinking_effort ? esc(c.thinking_effort) : '（官方默认 high）'],
+      ['temperature', c.temperature],
+      ['金额口径', pr.active
+        ? `${esc(pr.active.source === 'config' ? '你配置的价目' : '官方表')}｜当前${pr.active.period === 'peak' ? '高峰' : '空闲'}时段`
+        : '<span class="tag warn">无价目 → 只显示 token</span>']
+    ].map(([k, v]) => `<div class="k">${k}</div><div>${v}</div>`).join('');
+
+    $('authbox').innerHTML =
+      `<span class="tag ${a.configured ? 'ok' : 'bad'}">${a.configured ? '密钥已配置' : '没有可用密钥'}</span>`
+      + `<span class="mono">${esc(a.key_tail || '')}</span> `
+      + `<span class="muted">来源：${esc(a.source_text || '')}`
+      + (a.base_url ? `｜${esc(a.base_url)}` : '') + '</span>';
+
+    $('catnote').innerHTML = `来源：<b>${esc(SRC_TEXT[cat.source] || cat.source || '未知')}</b>`
+      + (cat.reason ? `（${esc(cat.reason)}）` : '')
+      + (cat.fetched_at ? `｜取于 ${esc(cat.fetched_at)}` : '');
+
+    const rows = (ST.models || []).map((x) => {
+      const picked = x.id === c.model;
+      const tb = (pr.table && picked) ? pr.table : null;
+      const price = tb
+        ? `空闲 ${money(tb.offpeak && tb.offpeak.input_miss_per_million)} /
+                 ${money(tb.offpeak && tb.offpeak.output_per_million)}<br>
+           <span class="muted">高峰 ${money(tb.peak && tb.peak.input_miss_per_million)} /
+                 ${money(tb.peak && tb.peak.output_per_million)}</span>`
+        : (picked && pr.active
+            ? `按当前生效价目：${money(pr.active.input_miss_per_million)} / ${money(pr.active.output_per_million)}`
+            : '<span class="muted">无官方价目</span>');
+      return `<tr class="${picked ? 'picked' : ''}">
+        <td><b>${esc(x.id)}</b><br><span class="muted">${esc(x.name || '')}</span></td>
+        <td>${x.context_window ? (x.context_window / 1024).toFixed(0) + 'K' : '—'}</td>
+        <td>${x.vision ? '<span class="tag ok">可读图</span>' : '<span class="tag bad">不支持图像</span>'}
+            ${x.reasoning ? `<span class="tag gray">思考 ${esc((x.reasoning_levels || []).join('/'))}</span>` : ''}
+            ${x.unknown ? '<span class="tag warn">能力未知</span>' : ''}</td>
+        <td>${price}</td>
+        <td>${picked ? '<span class="tag ok">在用</span>'
+                     : `<button class="btn mini ghost pick" data-model="${esc(x.id)}">用它</button>`}</td>
+      </tr>`;
+    }).join('');
+    $('models').innerHTML = rows || '<tr><td colspan="5" class="muted">没有模型信息</td></tr>';
+    $('modellist').innerHTML = (ST.models || []).map((x) => `<option value="${esc(x.id)}">`).join('');
+    document.querySelectorAll('.pick').forEach((b) => {
+      b.addEventListener('click', () => {
+        $('p_model').value = b.dataset.model;
+        mark('api.model');
+        msg('info', `已把模型改成 <b>${esc(b.dataset.model)}</b>（还没保存）—— 点底部的「保存」才生效。`);
+      });
+    });
+
+    // 参数表单：只在首次填充时写入，避免覆盖用户正在输入的内容
+    if (!ST._filled) {
+      $('p_model').value = c.model || '';
+      $('p_temp').value = c.temperature === null || c.temperature === undefined ? '' : c.temperature;
+      $('p_timeout').value = c.timeout_seconds || '';
+      $('p_thinking').value = c.thinking || 'disabled';
+      $('p_effort').value = c.thinking_effort || '';
+      $('p_base').value = c.base_url || '';
+      $('pr_in').value = c.pricing ? (c.pricing.input_per_million ?? '') : '';
+      $('pr_out').value = c.pricing ? (c.pricing.output_per_million ?? '') : '';
+      $('pr_hit').value = c.pricing ? (c.pricing.input_cached_per_million ?? '') : '';
+      $('pr_date').value = c.pricing ? (c.pricing.effective_date || '') : '';
+      $('p_offpeak').value = (c.offpeak_dates || []).join(', ');
+      $('p_peak').value = (c.peak_dates || []).join(', ');
+      ST._filled = true;
+    }
+
+    const th = ST.thinking || {};
+    $('tempnote').innerHTML = th.temperature_applies === false
+      ? '当前配置是<b>开思考</b>：官方规定思考模式下 <b>temperature 不生效</b>，'
+        + '所以请求里不会发它 —— 你改这个数字在开思考的调用上看不到效果，这是官方限制，不是程序坏了。'
+      : `temperature 会正常生效（当前调用不开思考）。${
+          c.thinking === 'enabled' ? '<b>注意：全局已开思考，那些调用会忽略它。</b>' : ''}`;
+
+    // 价目表
+    const t = pr.table;
+    $('pricenote').innerHTML = (pr.table_verified_at
+      ? `官方价目核对于 <b>${esc(pr.table_verified_at)}</b>（<a href="${esc(pr.table_source)}" target="_blank" rel="noopener">来源</a>）。`
+      : '')
+      + (pr.overridden ? ' <span class="tag warn">当前用的是你配置的覆盖价目</span>' : '');
+    $('pricetable').innerHTML = t
+      ? `<table><thead><tr><th>时段</th><th>输入·缓存命中</th><th>输入·未命中</th><th>输出</th></tr></thead>
+         <tbody>
+         <tr><td>空闲（高峰价的一半）</td><td>${money(t.offpeak && t.offpeak.input_cached_per_million)}</td>
+             <td>${money(t.offpeak && t.offpeak.input_miss_per_million)}</td>
+             <td>${money(t.offpeak && t.offpeak.output_per_million)}</td></tr>
+         <tr><td>高峰（工作日 9–12、14–18）</td><td>${money(t.peak && t.peak.input_cached_per_million)}</td>
+             <td>${money(t.peak && t.peak.input_miss_per_million)}</td>
+             <td>${money(t.peak && t.peak.output_per_million)}</td></tr>
+         </tbody></table>`
+      : `<div class="muted">官方表里没有当前模型（${esc(c.model)}）的价目：
+         金额不会显示，除非你在下面显式配置一组。
+         ${pr.active ? '当前正在用你配置的价目。' : ''}</div>`;
+    $('peakhours').innerHTML = (pr.peak_hours || []).map((p) => `${p[0]}:00–${p[1]}:00`).join('、')
+      + `（现在：${pr.period_now === 'peak' ? '高峰' : '空闲'}`
+      + (pr.beijing_time ? `，北京时间 ${pr.beijing_time}` : '') + '）'
+      + (pr.period_note ? `<br><span style="color:var(--warn)">${esc(pr.period_note)}</span>` : '');
+
+    // 场景
+    $('scenarios').innerHTML = (ST.scenarios || []).map((s) => {
+      // 数字预算/超时 → 数字输入框；retry_reconcile 是布尔（on/off），必须渲染成下拉框 ——
+      // 塞进 number 输入框里会显示成空白，用户以为"没设置"。
+      const numKey = (k) =>
+        `<div class="fld"><label>${esc(k.label)}</label>
+           <input type="number" class="scnkey" data-section="${esc(s.section)}"
+                  data-key="${esc(k.key)}" min="16" max="500000"
+                  value="${esc(k.value)}" data-default="${esc(k.default)}">
+           <span class="muted" style="font-size:11px">默认 ${esc(k.default)}${
+             k.value !== k.default ? ' ｜ <b>已改</b>' : ''}</span>
+           ${k.hint ? `<span class="muted" style="font-size:11px">${esc(k.hint)}</span>` : ''}
+         </div>`;
+      const enumKey = (k) =>
+        `<div class="fld"><label>${esc(k.label)}</label>
+           <select class="scnenum" data-section="${esc(s.section)}"
+                   data-key="${esc(k.key)}" data-default="${esc(k.default)}">
+             <option value="on" ${k.value === 'on' ? 'selected' : ''}>开</option>
+             <option value="off" ${k.value === 'off' ? 'selected' : ''}>关</option>
+           </select>
+           <span class="muted" style="font-size:11px">默认 ${esc(k.default)}${
+             k.value !== k.default ? ' ｜ <b>已改</b>' : ''}</span>
+           ${k.hint ? `<span class="muted" style="font-size:11px">${esc(k.hint)}</span>` : ''}
+         </div>`;
+      const keys = s.can_edit ? s.keys.map((k) =>
+        (k.key === 'retry_reconcile' ? enumKey(k) : numKey(k))).join('')
+        : `<div class="muted">这个场景用 <b>api</b> 段的通用超时：${esc(
+            (s.keys[0] || {}).value)} 秒（在上面的「可调参数」里改）。</div>`;
+      const think = s.section
+        ? `<div class="fld"><label>本场景思考</label>
+             <select class="scnthink" data-section="${esc(s.section)}">
+               <option value="">（跟全局）</option>
+               <option value="enabled" ${s.thinking === 'enabled' ? 'selected' : ''}>开</option>
+               <option value="disabled" ${s.thinking === 'disabled' ? 'selected' : ''}>关</option>
+             </select></div>`
+        : '';
+      return `<div class="scn"><h3>${esc(s.name)}</h3><div class="desc">${esc(s.desc)}</div>
+        <div class="grid3">${keys}${think}</div></div>`;
+    }).join('');
+    document.querySelectorAll('.scnkey').forEach((el) => el.addEventListener('change', () => {
+      mark(el.dataset.section + '.' + el.dataset.key);
+    }));
+    document.querySelectorAll('.scnenum').forEach((el) => el.addEventListener('change', () => {
+      mark(el.dataset.section + '.' + el.dataset.key);
+    }));
+    document.querySelectorAll('.scnthink').forEach((el) => el.addEventListener('change', () => {
+      mark(el.dataset.section + '.thinking');
+    }));
+
+    $('run_scn').innerHTML = (ST.scenarios || []).map((s) =>
+      `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+
+    showOverlay();
+
+    const wl = ST.warnings || [];
+    if (wl.length) {
+      $('msgs').insertAdjacentHTML('beforeend',
+        `<div class="msg warn"><b>需要你知道的 ${wl.length} 件事：</b>
+         <ul class="warnlist">${wl.map((w) => `<li>${w}</li>`).join('')}</ul></div>`);
+    }
+  }
+
+  // ------------------------------------------------------------ 组装改动
+  function collect() {
+    const body = { api: {}, scenarios: {} };
+    const c = ST.config || {};
+    const cur = {
+      model: $('p_model').value.trim(),
+      temperature: $('p_temp').value === '' ? null : Number($('p_temp').value),
+      timeout_seconds: $('p_timeout').value === '' ? null : Number($('p_timeout').value),
+      thinking: $('p_thinking').value,
+      thinking_effort: $('p_effort').value || null,
+      base_url: $('p_base').value.trim()
+    };
+    if (cur.model && cur.model !== c.model) body.api.model = cur.model;
+    if (cur.temperature !== null && cur.temperature !== c.temperature) body.api.temperature = cur.temperature;
+    if (cur.timeout_seconds !== null && cur.timeout_seconds !== c.timeout_seconds) {
+      body.api.timeout_seconds = cur.timeout_seconds;
+    }
+    if (cur.thinking !== c.thinking) body.api.thinking = cur.thinking;
+    if ((cur.thinking_effort || null) !== (c.thinking_effort || null)) {
+      body.api.thinking_effort = cur.thinking_effort;
+    }
+    if (cur.base_url && cur.base_url !== c.base_url) body.api.base_url = cur.base_url;
+    const key = $('p_key').value.trim();
+    if (key) body.api.api_key = key;
+
+    const dates = (el) => el.value.split(/[,，\s]+/).map((s) => s.trim()).filter(Boolean);
+    const off = dates($('p_offpeak')), pk = dates($('p_peak'));
+    if (off.join(',') !== (c.offpeak_dates || []).join(',')) body.api.offpeak_dates = off;
+    if (pk.join(',') !== (c.peak_dates || []).join(',')) body.api.peak_dates = pk;
+
+    const pin = $('pr_in').value, pout = $('pr_out').value, phit = $('pr_hit').value;
+    const pd = $('pr_date').value.trim();
+    const before = c.pricing || {};
+    const pricing = {};
+    if (pin !== '' && Number(pin) !== before.input_per_million) pricing.input_per_million = Number(pin);
+    if (pout !== '' && Number(pout) !== before.output_per_million) pricing.output_per_million = Number(pout);
+    if (phit !== '' && Number(phit) !== before.input_cached_per_million) pricing.input_cached_per_million = Number(phit);
+    if (pd && pd !== (before.effective_date || '')) pricing.effective_date = pd;
+    // 价格是**成对**的：只给一个会被服务端拒掉，这里先提示，别让用户白跑一趟
+    const hasIn = pin !== '' || before.input_per_million !== undefined;
+    const hasOut = pout !== '' || before.output_per_million !== undefined;
+    if (Object.keys(pricing).length && (!hasIn || !hasOut)) {
+      return { error: '价目至少要同时给出「输入」与「输出」两个单价（只给一个会让金额算错）。' };
+    }
+    if (Object.keys(pricing).length) body.pricing = pricing;
+
+    document.querySelectorAll('.scnkey').forEach((el) => {
+      const v = Number(el.value);
+      if (el.value !== '' && v !== Number(el.dataset.default)) {
+        (body.scenarios[el.dataset.section] = body.scenarios[el.dataset.section] || {})[el.dataset.key] = v;
+      }
+    });
+    document.querySelectorAll('.scnenum').forEach((el) => {
+      if (el.value && el.value !== String(el.dataset.default)) {
+        (body.scenarios[el.dataset.section] = body.scenarios[el.dataset.section] || {})[el.dataset.key] = el.value;
+      }
+    });
+    document.querySelectorAll('.scnthink').forEach((el) => {
+      if (el.value) (body.scenarios[el.dataset.section] = body.scenarios[el.dataset.section] || {}).thinking = el.value;
+    });
+    if (!Object.keys(body.scenarios).length) delete body.scenarios;
+    if (!Object.keys(body.api).length) delete body.api;
+    return body;
+  }
+
+  // ------------------------------------------------------------ 动作
+  async function load() {
+    const { j } = await api('GET', '/api/ai/settings');
+    ST = j;
+    clearMsgs();
+    if (!j.ok) { msg('bad', '读取设置失败：' + esc(j.error)); return; }
+    render();
+    dirty.clear();
+  }
+
+  async function save(extra) {
+    clearMsgs();
+    const body = collect();
+    if (body.error) { msg('bad', body.error); return false; }
+    Object.assign(body, extra || {});
+    if (!body.api && !body.scenarios && !body.pricing
+        && !body.clear_pricing && !body.clear_api_key) {
+      msg('info', '没有检测到改动。');
+      return false;
+    }
+    const { j } = await api('PUT', '/api/ai/settings', body);
+    if (!j.ok) {
+      msg('bad', '保存失败：' + esc(j.error)
+        + (j.models ? '<br>目录里的模型：<span class="mono">' + j.models.map(esc).join('、') + '</span>' : ''));
+      return false;
+    }
+    ST = j; ST._filled = false;
+    $('p_key').value = '';
+    clearMsgs();
+    msg('ok', '已保存：<span class="mono">' + (j.written || []).join('、') + '</span><br>'
+      + esc(j.message || ''));
+    render();
+    dirty.clear();
+    return true;
+  }
+
+  function out(text) { $('runout').textContent = text; }
+
+  function prettyRun(j) {
+    if (!j.ok) return '失败：' + (j.error || '未知错误');
+    const t = j.trace || {}, u = j.usage_info || {};
+    const lines = [
+      `场景：${j.scenario_name}（${j.scenario}）`,
+      `模型：${t.model}${j.model_info && j.model_info.name ? '（' + j.model_info.name + '）' : ''}`,
+      `思考：${t.thinking ? '开' : '关'}${t.reasoning_effort ? '，effort=' + t.reasoning_effort
+        + '（实际 ' + t.effort_effective + '）' : '（未指定 effort，用官方默认）'}`,
+      `思考开关来自：${t.thinking_source}`,
+      `temperature：${t.temperature_applied === undefined ? '未发送'
+        : t.temperature_applied}${t.temperature_ignored ? '（开了思考，官方规定不生效，故未发送）' : ''}`,
+      `json_mode：${t.json_mode}｜max_tokens：${t.max_tokens}｜超时：${t.timeout}s`,
+      `endpoint：${t.endpoint}`,
+      `回复：${j.reply || '（空）'}`,
+      `用量：tokens ${u.prompt_tokens}/${u.completion_tokens}`
+        + (u.reasoning_tokens ? `（含推理 ${u.reasoning_tokens}）` : '')
+        + (u.cached_tokens ? `（缓存命中 ${u.cached_tokens}）` : '')
+        + (u.cost !== null && u.cost !== undefined
+            ? ` ≈ ${Number(u.cost).toFixed(4)} ${u.currency}（${u.cost_period === 'peak' ? '高峰' : '空闲'}时段）`
+            : '（无价目，不显示金额）')
+    ];
+    if (j.warnings && j.warnings.length) lines.push('', '提醒：', ...j.warnings.map((w) => '· ' + w));
+    return lines.join('\n');
+  }
+
+  $('btn_save').addEventListener('click', () => save());
+  $('btn_clearkey').addEventListener('click', async () => {
+    if (!confirm('清除覆盖层里的 API key？\n（config.json 或环境变量里的那把不受影响）')) return;
+    await save({ clear_api_key: true });
+  });
+  $('btn_clearprice').addEventListener('click', async () => {
+    if (!confirm('清掉覆盖价目，改用官方价目表？')) return;
+    await save({ clear_pricing: true });
+  });
+  $('btn_refresh').addEventListener('click', async () => {
+    out('正在问服务端 …');
+    const { j } = await api('POST', '/api/ai/settings/refresh');
+    if (!j.ok) { out('刷新失败：' + (j.error || '')); return; }
+    ST = j.settings; ST._filled = false;
+    clearMsgs(); render();
+    msg(j.catalog.source === 'live' ? 'ok' : 'warn', esc(j.note || ''));
+    out('目录来源：' + j.catalog.source + '（' + (j.catalog.models || []).map((m) => m.id).join('、') + '）');
+  });
+  $('btn_test').addEventListener('click', async () => {
+    out('正在测试连接 …');
+    const { j } = await api('POST', '/api/ai/settings/test');
+    if (!j.ok) { out('连接失败：' + (j.error || '')); return; }
+    const t = j.trace || {}, u = j.usage_info || {};
+    out(`连接正常：${j.reply || ''}\n模型 ${t.model}｜思考 ${t.thinking ? '开' : '关'}`
+      + `｜tokens ${u.prompt_tokens}/${u.completion_tokens}`
+      + (u.cost !== null && u.cost !== undefined ? ` ≈ ${Number(u.cost).toFixed(4)} ${u.currency}` : ''));
+  });
+  $('btn_run').addEventListener('click', async () => {
+    const raw = $('run_thinking').value;
+    out('正在试跑（会产生一次极小的真实调用）…');
+    const { j } = await api('POST', '/api/ai/settings/run', {
+      scenario: $('run_scn').value,
+      thinking: raw === '' ? null : (raw === 'true')
+    });
+    out(prettyRun(j));
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

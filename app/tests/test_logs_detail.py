@@ -9,6 +9,10 @@
   ⑤ 题目不在库里时 missing=True，**不能静默少一行**（交接文档 §5.1.2）
   ⑥ 与学习复盘联动：已生成报告的组带 report_id
   ⑦ 空日期不炸
+  ⑧ sessions.question_ids 幂等迁移 + 入参清洗
+  ⑨ **完整练习内容**：题单里没作答的题也要出现在日志里（unanswered=True），
+     有题干/选项/正确答案/采分点，但不算分、不算命中率
+  ⑩ 老 session（没有题单）行为不变：只显示做过的题，并标明 has_question_set=False
 
 规矩（docs/交接文档.md §5.1）：**绝不在用户的真实库上做测试**。
 本测试把库复制成临时副本，用 DSH_DB 让 server 连副本，跑完删掉。
@@ -48,6 +52,7 @@ assert server.DB == TEST_DB, f"server 没有连到副本库：{server.DB}"
 
 # 用明显不可能的学习日期标记测试数据（交接文档 §5.1），跑完即随副本一起删除
 TEST_DATE = "1900-01-01"
+FULL_SET_DATE = "1900-02-02"     # ⑨「完整练习内容」用另一天，免得打乱 ③④ 的按天计数
 FAILED = []
 
 
@@ -287,7 +292,195 @@ finally:
 
 print()
 print("=" * 68)
-print("⑧ 确认真实库一字未动")
+print("⑧ sessions.question_ids：幂等迁移 + 入参清洗")
+print("=" * 68)
+con = sqlite3.connect(TEST_DB)
+scols = {r[1] for r in con.execute("PRAGMA table_info(sessions)")}
+con.close()
+check("sessions 加了 question_ids 列", "question_ids" in scols, str(sorted(scols)))
+try:
+    server.ensure_schema()
+    check("question_ids 迁移幂等（跑第二遍不报错）", True)
+except Exception as e:
+    check("question_ids 迁移幂等（跑第二遍不报错）", False, f"{type(e).__name__}: {e}")
+
+check("清洗：去重且保序", server._clean_question_ids([3, 1, 3, 2]) == [3, 1, 2],
+      str(server._clean_question_ids([3, 1, 3, 2])))
+check("清洗：字符串 id 也认（AI/前端可能传来 \"304\"）",
+      server._clean_question_ids(["7", "8"]) == [7, 8],
+      str(server._clean_question_ids(["7", "8"])))
+check("清洗：0 / 负数 / None / 垃圾一律丢掉",
+      server._clean_question_ids([0, -5, None, "abc", 4]) == [4],
+      str(server._clean_question_ids([0, -5, None, "abc", 4])))
+check("清洗：坏 JSON 读回来当空列表（不让一个字段炸接口）",
+      server._session_question_ids("{不是 JSON") == [],
+      str(server._session_question_ids("{不是 JSON")))
+check("清洗：超长入参被截断到上限",
+      len(server._clean_question_ids(list(range(1, 500)))) == server.MAX_SESSION_QUESTIONS,
+      str(len(server._clean_question_ids(list(range(1, 500))))))
+
+print()
+print("=" * 68)
+print("⑨ 完整练习内容：没作答的题也要在日志里（题单 6 道，只做 2 单选 + 1 主观）")
+print("=" * 68)
+con = sqlite3.connect(TEST_DB)
+con.row_factory = sqlite3.Row
+full_singles = [dict(r) for r in con.execute(
+    "SELECT id, answer FROM questions WHERE qtype='single' AND answer IS NOT NULL "
+    "AND options IS NOT NULL LIMIT 4")]
+# 主观题要挑一道**这一次没作答的**（前面 ② 已经答过 sub_id，再拿来当"没作答"就自相矛盾）
+full_sub = con.execute(
+    "SELECT id FROM questions WHERE qtype IN ('short','analysis','essay') "
+    "AND id IN (SELECT DISTINCT question_id FROM points) AND id <> ? LIMIT 1",
+    (sub_id,)).fetchone()
+con.close()
+full_sub_id = full_sub["id"]
+
+
+def wrong_of(correct):
+    """随便挑一个不是正确答案的选项字母：用来稳定构造"答对 1 道 / 答错 1 道"。"""
+    for c in "ABCD":
+        if c != correct:
+            return c
+    return "A"
+
+# 题单故意乱序给（模拟前端按"单选在前、主观在后"收集）：日志要按题单顺序还原
+# 6 道题里只作答 3 道（2 单选 + 1 主观），另 3 道（1 单选 + 1 主观）全程不碰
+SET_IDS = [full_singles[2]["id"], full_singles[0]["id"], full_singles[3]["id"],
+           full_singles[1]["id"], sub_id, full_sub_id]
+res9 = server.save({
+    "date": FULL_SET_DATE, "mode": "模拟考试", "note": "完整练习内容回归",
+    "question_ids": SET_IDS,
+    # 第 1 道答对、第 2 道答错 —— 后面用它们验证"没作答的题不参与正确率"
+    "single": [{"id": full_singles[0]["id"], "answer": full_singles[0]["answer"]},
+               {"id": full_singles[1]["id"], "answer": wrong_of(full_singles[1]["answer"])}],
+    "subjective": [{"id": sub_id, "hits": [1, 2], "answer_text": "完整练习内容测试原文"}],
+})
+sid9 = res9["saved"].get("session_id")
+check("save 返回 session_id", bool(sid9), str(sid9))
+check("save 回显这次记下了几道题", res9["saved"].get("question_ids") == 6,
+      str(res9["saved"].get("question_ids")))
+
+con = sqlite3.connect(TEST_DB)
+stored_ids = json.loads(con.execute("SELECT question_ids FROM sessions WHERE id=?",
+                                    (sid9,)).fetchone()[0] or "[]")
+con.close()
+check("题单落库且顺序不变", stored_ids == SET_IDS, str(stored_ids))
+
+det9 = server.logs_day(FULL_SET_DATE)
+g9 = det9["groups"][0] if det9["groups"] else {}
+qs9 = g9.get("questions") or []
+check("明细题数 = 整份卷子（含没作答的）", len(qs9) == 6, f"{len(qs9)} 道")
+check("接口区分「能看到几道」与「作答几道」",
+      det9.get("count") == 6 and det9.get("attempted_n") == 3,
+      f"count={det9.get('count')} attempted_n={det9.get('attempted_n')}")
+check("接口给出未作答题数", det9.get("unanswered_n") == 3, str(det9.get("unanswered_n")))
+check("按题单顺序还原（不是按作答顺序）",
+      [q["question_id"] for q in qs9] == SET_IDS,
+      str([q["question_id"] for q in qs9]))
+check("组里标明有题单", g9.get("has_question_set") is True, str(g9.get("has_question_set")))
+check("组里给出总题数 / 未作答数",
+      g9.get("questions_n") == 6 and g9.get("unanswered_n") == 3,
+      f"questions_n={g9.get('questions_n')} unanswered_n={g9.get('unanswered_n')}")
+
+answered9 = [q for q in qs9 if q["answered"]]
+un9 = [q for q in qs9 if not q["answered"]]
+check("作答的题 answered=True", len(answered9) == 3, f"{len(answered9)} 道")
+check("没作答的题 answered=False", len(un9) == 3, f"{len(un9)} 道")
+un9_single = [q for q in un9 if q["qtype"] == "single"]
+check("没作答的客观题：题干照给（不然「包括没做的」就只是一行编号）",
+      all(q.get("stem") for q in un9_single),
+      str([(q.get("stem") or "")[:12] for q in un9_single]))
+check("没作答的客观题：选项照给",
+      all(len(q.get("options") or {}) >= 2 for q in un9_single),
+      str([len(q.get("options") or {}) for q in un9_single]))
+check("没作答的客观题：正确答案照给", all(q.get("correct_answer") for q in un9_single),
+      str([q.get("correct_answer") for q in un9_single]))
+check("没作答的题不算对也不算错（is_right=None）",
+      all(q["is_right"] is None and q["score"] is None for q in un9),
+      str([(q["is_right"], q["score"]) for q in un9]))
+check("没作答的题没有 attempt_id（它本来就没有作答行）",
+      all(q["attempt_id"] is None for q in un9), str([q["attempt_id"] for q in un9]))
+check("没作答的题不算 missing（题还在库里，只是没做）",
+      all(q["missing"] is False for q in un9), str([q["missing"] for q in un9]))
+
+sub9 = next((q for q in qs9 if q["question_id"] == full_sub_id), {})
+check("没作答的主观题：带采分点（否则那道题在页面上是空的）",
+      len(sub9.get("points") or []) >= 2, f"{len(sub9.get('points') or [])} 个采分点")
+check("没作答的主观题：采分点全部未命中",
+      all(p["hit"] is False for p in (sub9.get("points") or [])),
+      str([p["hit"] for p in sub9.get("points") or []]))
+check("没作答的主观题：没有批改结果", sub9.get("grade") is None, str(sub9.get("grade")))
+
+# 另一道主观题**作答了**：命中标记不能被"同一天另一道主观题"或"没作答的那道"串味
+sub_done9 = next((q for q in qs9 if q["question_id"] == sub_id), {})
+check("作答过的主观题：命中标记照样准（勾了 1、2）",
+      {p["seq"] for p in (sub_done9.get("points") or []) if p["hit"]} == {1, 2},
+      str({p["seq"]: p["hit"] for p in sub_done9.get("points") or []}))
+
+check("小结口径不变：只统计作答过的题（正确率不被没做的题拉低）",
+      (g9.get("summary") or {}).get("objective_total") == 2
+      and (g9.get("summary") or {}).get("objective_right") == 1,
+      str(g9.get("summary")))
+check("主观题命中只算作答过的那次", (g9.get("summary") or {}).get("point_hits") == 2,
+      str(g9.get("summary")))
+
+# 题单里有一道**已不在题库**的题：也要占一格显示出来，不能悄悄少一道
+_ghost = 987654
+con = sqlite3.connect(TEST_DB)
+con.execute("UPDATE sessions SET question_ids=? WHERE id=?",
+            (json.dumps(SET_IDS + [_ghost]), sid9))
+con.commit()
+con.close()
+det9c = server.logs_day(FULL_SET_DATE)
+g9c = det9c["groups"][0]
+ghost = next((q for q in g9c["questions"] if q["question_id"] == _ghost), None)
+check("题单里的题已被删 → 仍然占一格（不静默少一行）", ghost is not None,
+      str([q["question_id"] for q in g9c["questions"]]))
+check("并且标成 missing", bool(ghost) and ghost["missing"] is True,
+      str(ghost.get("missing") if ghost else None))
+check("题数把它算进去", g9c["questions_n"] == 7 and len(g9c["questions"]) == 7,
+      f"questions_n={g9c['questions_n']} 实际 {len(g9c['questions'])}")
+
+# 日志列表（/api/logs）也要带出题单，前端才能显示"这次共几道"
+lst9 = {d["date"]: d for d in server.logs()["days"]}
+s9 = (lst9.get(FULL_SET_DATE) or {}).get("sessions") or [{}]
+check("列表接口带上这一次的题单", s9[0].get("question_ids") == SET_IDS + [_ghost],
+      str(s9[0].get("question_ids"))[:80])
+_day9 = lst9.get(FULL_SET_DATE) or {}
+check("天级数据也区分题单数与作答数",
+      _day9.get("questions_n") == 7 and _day9.get("attempts_n") == 3,
+      f"questions_n={_day9.get('questions_n')} attempts_n={_day9.get('attempts_n')}")
+
+_sum9 = server.logs()["summary"]
+check("总览里同时给出「作答数」与「其中没做的」",
+      _sum9.get("attempts", 0) < _sum9.get("questions", 0)
+      and _sum9.get("unanswered", 0) >= 4,
+      str({k: _sum9.get(k) for k in ("attempts", "questions", "unanswered")}))
+
+print()
+print("=" * 68)
+print("⑩ 老 session（没有题单）：行为不变，并标明 has_question_set=False")
+print("=" * 68)
+det_old = server.logs_day(TEST_DATE)
+g_old = next((x for x in det_old["groups"] if x.get("session_id") == sid), None)
+check("老 session 仍按「做过的题」显示", bool(g_old) and len(g_old["questions"]) == 7,
+      f"{len(g_old['questions']) if g_old else 0} 道")
+check("并标明这次没有题单", g_old and g_old.get("has_question_set") is False,
+      str(g_old.get("has_question_set") if g_old else None))
+check("老 session 的未作答数 = 0（它本来就没有「没做的题」这个概念）",
+      g_old and g_old.get("unanswered_n") == 0,
+      str(g_old.get("unanswered_n") if g_old else None))
+check("老 session 的题全部 answered=True",
+      all(q["answered"] for q in g_old["questions"]),
+      str([q["answered"] for q in g_old["questions"]]))
+check("老 session 的采分点命中判定没被改坏（勾了 1、2）",
+      {p["seq"] for q in g_old["questions"] for p in q["points"] if p["hit"]} == {1, 2},
+      str({p["seq"] for q in g_old["questions"] for p in q["points"] if p["hit"]}))
+
+print()
+print("=" * 68)
+print("⑪ 确认真实库一字未动")
 print("=" * 68)
 after = (REAL_DB.stat().st_size, REAL_DB.stat().st_mtime_ns)
 check(f"{REAL_DB.name} 大小/修改时间未变", BEFORE == after, f"before={BEFORE} after={after}")

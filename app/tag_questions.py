@@ -118,8 +118,7 @@ def main():
         print(f"  批次 {i//BATCH+1}/{(len(qs)+BATCH-1)//BATCH} 完成，累计挂载 {done}")
 
     con.close()
-    cost = total_in / 1e6 * 1 + total_out / 1e6 * 4
-    print(f"\n挂载完成 {done}/{len(qs)} 道   tokens {total_in}/{total_out}  ≈ {cost:.4f} 元")
+    print(f"\n挂载完成 {done}/{len(qs)} 道   {ai.usage_line(total_in, total_out)}")
 
     # 复核
     con = sqlite3.connect(DB)

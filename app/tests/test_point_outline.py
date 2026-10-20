@@ -117,11 +117,21 @@ sub = con.execute(
     "LIMIT 1").fetchone()
 pt = con.execute("SELECT id, seq FROM points WHERE question_id=? ORDER BY seq",
                  (sub["qid"],)).fetchall()
+# 新列（attempts.point_source 等）由 `server.ensure_schema()` 迁移出来。生产里服务启动时
+# 就跑过迁移；测试库是真实库的拷贝、可能还没迁移过，所以在**写这一条作答之前**补跑一次。
+# **不能提到文件开头**：那样会先把挂载补齐，① 的「未挂载现状」与 ② 的「补齐测试」就没东西可测。
+server.ensure_schema()
 con.execute("INSERT INTO sessions (date,mode,created_at) VALUES ('1900-01-01','测试','x')")
 sid = con.execute("SELECT last_insert_rowid()").fetchone()[0]
+# `point_source='self_confirmed'`：这一步模拟的是"学生自己勾了 1 个采分点"。
+# 2026-10-08 起 `/api/weakness` 按来源分账 —— 只有"用户自评确认 / 采纳 AI 建议"的样本
+# 进 `items`；来源不明的旧记录单列 `legacy_items`（设计 §2.2）。
+# 不写来源的话这条作答属于"来源不明"，本节要断言的"挂载补齐后进入薄弱点统计"就
+# 测到 `legacy_items` 上去了（那是另一条断言，见 tests/test_scoring_v2.py）。
 con.execute(
-    "INSERT INTO attempts (question_id,date,mode,hits,total,cause,note,session_id) "
-    "VALUES (?,?,?,?,?,?,?,?)", (sub["qid"], "1900-01-01", "主观自评", 1, len(pt), None, None, sid))
+    "INSERT INTO attempts (question_id,date,mode,hits,total,cause,note,session_id,point_source) "
+    "VALUES (?,?,?,?,?,?,?,?,?)",
+    (sub["qid"], "1900-01-01", "主观自评", 1, len(pt), None, None, sid, "self_confirmed"))
 aid = con.execute("SELECT last_insert_rowid()").fetchone()[0]
 con.execute("INSERT INTO point_hits (attempt_id,point_id,hit) VALUES (?,?,1)", (aid, pt[0]["id"]))
 con.commit()
@@ -131,6 +141,7 @@ check("已造一次主观作答（勾 1/2 个采分点）", True,
 ph = con.execute("SELECT COUNT(*) FROM point_hits WHERE attempt_id=?", (aid,)).fetchone()[0]
 check("point_hits 写入成功", ph == 1, f"{ph} 条")
 
+# 读接口（/api/weakness）按来源分账，来源已在上面写入 self_confirmed
 w = server.weakness()["items"]
 qid_of_attempt = sub["qid"]
 node = next((x for x in w if x["oid"] == sub["outline_id"]), None)

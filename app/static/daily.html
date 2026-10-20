@@ -5,45 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>311 日常练习</title>
 <style>
-  :root { --line:#e3e3e3; --ink:#222; --muted:#777; --accent:#2b6cb0; --ok:#2f855a; --bad:#c53030; --bg:#fafafa; }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
-         color:var(--ink); background:var(--bg); line-height:1.75; }
-  header { position:sticky; top:0; z-index:9; background:#fff; border-bottom:1px solid var(--line);
-           padding:10px 18px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
-  header h1 { font-size:16px; margin:0; font-weight:600; }
-  .steps { display:flex; gap:6px; font-size:13px; }
-  .steps span { padding:2px 10px; border-radius:12px; background:#eef1f4; color:var(--muted); }
-  .steps span.on { background:var(--accent); color:#fff; }
-  main { max-width:900px; margin:0 auto; padding:18px; }
-  section { background:#fff; border:1px solid var(--line); border-radius:8px; padding:18px 20px; margin-bottom:16px; }
   section[hidden] { display:none; }
-  h2 { font-size:15px; margin:0 0 12px; padding-bottom:8px; border-bottom:1px solid var(--line); }
-  textarea { width:100%; min-height:120px; padding:10px; font-size:14px; font-family:inherit;
-             border:1px solid var(--line); border-radius:6px; resize:vertical; }
-  button { font-size:14px; padding:8px 18px; border-radius:6px; border:1px solid var(--accent);
-           background:var(--accent); color:#fff; cursor:pointer; }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  button.ghost { background:#fff; color:var(--accent); }
-  button.mini { font-size:12px; padding:4px 10px; }
-  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px; }
-  .muted { color:var(--muted); font-size:13px; }
-  .tag { display:inline-block; font-size:12px; padding:1px 7px; border-radius:10px;
-         background:#eef3f8; color:var(--accent); margin-left:6px; }
+
   .tag.ai { background:#fdf3e7; color:#b7791f; }
   .tag.real { background:#e8f5ec; color:var(--ok); }
-  .q { padding:14px 0; border-bottom:1px dashed var(--line); }
-  .q:last-child { border-bottom:none; }
+
   .stem { margin-bottom:8px; white-space:pre-wrap; }
-  .no { display:inline-block; min-width:30px; font-weight:700; color:var(--accent); }
-  label.opt { display:block; padding:5px 0 5px 30px; cursor:pointer; border-radius:4px; }
-  label.opt:hover { background:#f2f6fa; }
+
   .pts { margin-top:10px; padding:10px 12px; background:#fbfbfb; border:1px dashed var(--line); border-radius:6px; }
   .pt { padding:3px 0; font-size:14px; }
   .pt .ev { color:var(--muted); font-size:12px; }
-  .card { border:1px solid var(--line); border-radius:6px; padding:10px 12px; margin:8px 0; }
+
   .card h4 { margin:0 0 6px; font-size:14px; }
-  .score { font-size:20px; font-weight:700; }
+
   .grade { background:#f7fafc; border:1px solid var(--line); border-radius:6px;
            padding:12px; margin-top:10px; white-space:pre-wrap; font-size:14px; }
   .per para, .per p { margin:6px 0; }
@@ -75,75 +49,105 @@
   .think-toggle { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:14px; }
   .think-toggle input { width:16px; height:16px; }
   .tag.diff { background:#eef3f8; color:var(--accent); }
+
+  /* ===== 题量档位（步骤 ② 的组卷设置里）===== */
+  .gs-title { font-size:13.5px; font-weight:600; margin:12px 0 6px; }
+  .group-steps { display:flex; gap:8px; flex-wrap:wrap; }
+  .group-steps .group-btn { display:flex; flex-direction:column; gap:1px; align-items:flex-start;
+    font-size:13px; padding:7px 14px; border-radius:8px; background:#fff; color:var(--ink);
+    border:1px solid var(--line); cursor:pointer; line-height:1.45; text-align:left; }
+  .group-steps .group-btn b { font-size:14px; }
+  .group-steps .group-btn span { font-size:12px; color:var(--muted); }
+  .group-steps .group-btn.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .group-steps .group-btn.on span { color:#e6eef7; }
+  .tag.warn { background:#fdf3e7; color:#b7791f; }
+  /* 步骤 ② 的「组卷方式」两个按钮要能一眼分清是两条不同的路 */
+  #btnGenReal, #btnGenAi { min-width:210px; text-align:center; }
 </style>
+<link rel="stylesheet" href="/static/app-ui.css">
+<script src="/static/app-shell.js" defer></script>
+<!-- 答案解析与批改组件：四个页面共用一份实现（/static/qa-answer.js 由 server.py 提供） -->
+<script src="/static/qa-answer.js"></script>
 </head>
-<body>
-<header>
-  <h1>311 日常练习</h1>
-  <div class="steps">
-    <span id="st1" class="on">① 输入记录</span>
-    <span id="st2">② 确认考点</span>
-    <span id="st3">③ 答题</span>
-    <span id="st4">④ 结果</span>
-  </div>
-  <div style="flex:1"></div>
-  <span class="muted" id="usage"></span>
-  <a href="/" class="muted" style="text-decoration:none">← 模拟考试</a>
-  <a href="/logs" class="muted" style="text-decoration:none">练习日志</a>
-  <a href="/reports" class="muted" style="text-decoration:none">学习复盘</a>
-</header>
+<body data-page="daily">
+<header class="app-header"><nav class="app-nav" data-app-nav aria-label="主要导航">311 备考系统</nav></header>
 
 <main>
-  <!-- 步骤 1 -->
+  <div class="page-hero">
+    <p class="eyebrow">日常练习</p>
+    <div class="page-heading-row"><h1>从今天所学，开始下一次练习</h1>
+      <span class="muted" id="usage"></span></div>
+    <p class="intro">定位考点、确认题量，再进入作答与批改。每一步都由你确认。</p>
+  </div>
+  <div class="steps" aria-label="练习进度">
+    <span id="st1" class="on">① 输入记录</span><span id="st2">② 确认考点与组卷</span>
+    <span id="st3">③ 答题</span><span id="st4">④ 结果</span>
+  </div>
+
+  <!-- 步骤 1：只做「定位」这一件事 -->
   <section id="s1">
-    <h2>今天学了什么？</h2>
+    <h2>① 今天学了什么？</h2>
     <p class="muted">用你自己的话写就行，比如「背诵外国教育史第四章 近代国家教育体制；夸美纽斯、卢梭、裴斯泰洛齐。做题：中国教育史第五章 理学教育思想」。</p>
     <textarea id="log" placeholder="今天背诵了…&#10;做了…的题"></textarea>
     <div class="row">
-      <button id="btnParse" onclick="doParse()">解析并定位考点</button>
-      <button class="ghost" onclick="doWeakPaper()">按我的薄弱点出题（不用填记录）</button>
-      <button class="ghost" onclick="doAiSet()" id="btnAiSet"
-        title="全部由 AI 原创、刻意不用真题；最后一题论述题会带一段真实教育政策材料">
-        ✦ 全 AI 模拟组（20 单选 + 3 主观，不用真题）</button>
+      <button id="btnParse" onclick="doParse()">解析并定位考点 →</button>
+      <button class="ghost" onclick="doWeakPoints()">不填记录，直接按薄弱点 →</button>
       <span class="muted" id="msg1"></span>
     </div>
-    <p class="muted" style="margin:6px 0 0;font-size:12.5px">
-      「全 AI 模拟组」= 按上面这段学习记录定主题，题目全部 AI 原创（<b>不抽真题</b>），
-      难度按下面的「出题设置」走、刻意避免识记题；最后一题论述题带材料，取材于
-      <code>source/教育热点.md</code> 里的真实政策热点。生成耗时取决于思考模式开关。
+    <p class="muted" style="margin:8px 0 0;font-size:12.5px">
+      <b>两个入口都先走到「② 确认考点」</b>：AI 从你的记录里定位考点（偶尔会多识别，
+      那一步可以取消勾选），确认完再选组卷方式。<b>组卷方式有两种</b>：
     </p>
-    <details class="genset" open>
-      <summary>⚙ 出题设置（难度档位 / 思考模式）</summary>
-      <div class="genset-body"></div>
-    </details>
-    <div id="aiSetReport"></div>
+    <ul class="muted" style="margin:4px 0 0;padding-left:22px;font-size:12.5px;line-height:1.8">
+      <li><b>真题为主 + AI 补缺</b>：优先抽历年统考真题（考的就是真题的路子），不够才让 AI 补。</li>
+      <li><b>全 AI 原创（不用真题）</b>：刻意避开真题练过的角度，最后一题论述题带一段
+        <code>source/教育热点.md</code> 里的真实政策材料。</li>
+    </ul>
     <div id="focusBox"></div>
   </section>
 
-  <!-- 步骤 2 -->
+  <!-- 步骤 2：确认考点 + 选组卷方式（合成一步，不再各走一条路） -->
   <section id="s2" hidden>
-    <h2>确认考点<span class="muted" style="font-weight:400;font-size:13px">（取消勾选不相关的，AI 偶尔会多识别）</span></h2>
+    <h2>② 确认考点与组卷<span class="muted" id="genSetBrief"
+        style="font-weight:400;font-size:13px"></span></h2>
+
+    <div id="weakBox"></div>
+
+    <div class="muted" id="matchHint" style="margin-bottom:6px">
+      下面是 AI 定位到的考点，<b>取消勾选不相关的</b>（它偶尔会多识别）。
+    </div>
+    <div class="row" style="margin:0 0 10px">
+      <button class="ghost mini" onclick="setAllMarks(true)">全选</button>
+      <button class="ghost mini" onclick="setAllMarks(false)">全不选</button>
+      <span class="muted" id="pickedCount"></span>
+    </div>
     <div id="matches"></div>
     <div id="unmatchedBox"></div>
-    <details class="genset">
-      <summary>⚙ 出题设置<span class="muted" id="genSetBrief"></span></summary>
+
+    <details class="genset" open>
+      <summary>⚙ 组卷设置（题量档位 / 难度 / 思考模式）</summary>
       <div class="genset-body"></div>
     </details>
-    <div class="row">
-      <button onclick="doGenerate()" id="btnGen">按这些考点出题（20 客观 + 3 主观）</button>
-      <button class="ghost" onclick="goStep(1)">返回修改记录</button>
+
+    <div class="row" style="margin-top:14px">
+      <button onclick="doGenerate('real')" id="btnGenReal">按这些考点组卷（真题为主 + AI 补缺）</button>
+      <button class="ghost" onclick="doGenerate('ai')" id="btnGenAi">✦ 全 AI 原创组卷（不用真题）</button>
+      <button class="ghost" onclick="goStep(1)">← 返回修改记录</button>
       <span class="muted" id="msg2"></span>
     </div>
+    <p class="muted" style="margin:6px 0 0;font-size:12.5px" id="genEstimate"></p>
+    <div id="aiSetReport"></div>
   </section>
 
   <!-- 步骤 3 -->
   <section id="s3" hidden>
-    <h2>答题 <span class="muted" id="paperInfo" style="font-weight:400;font-size:13px"></span></h2>
+    <h2>③ 答题 <span class="muted" id="paperInfo" style="font-weight:400;font-size:13px"></span></h2>
+    <div id="paperComposition"></div>
     <div id="paper"></div>
     <div class="row">
       <button onclick="submitAll()" id="btnSubmit">提交并保存</button>
       <button class="ghost" onclick="toggleDailyAnswers()" id="btnDailyAnswers">显示答案解析</button>
-      <button class="ghost" onclick="doGenerate()">再练一组</button>
+      <button class="ghost" onclick="backToPlan()">再练一组（改考点/题量）</button>
       <span class="muted" id="msg3"></span>
     </div>
   </section>
@@ -162,6 +166,24 @@
 
 <script>
 let MATCHES = [], PAPER = null, SUBJECTIVE_IDS = [], SESSION_ID = null, GRADES = {};
+let SAVE_BUSY = false, SAVE_LAST = null, SAVE_FP = null, SAVE_ID = null;
+function submissionIdFor(fingerprint) {
+  if (SAVE_FP !== fingerprint) {
+    SAVE_FP = fingerprint;
+    SAVE_ID = crypto.randomUUID();
+  }
+  return SAVE_ID;
+}
+function resetSubmission() {
+  SAVE_BUSY = false;
+  SAVE_LAST = SAVE_FP = SAVE_ID = null;
+  $('btnSubmit').disabled = false;
+}
+// 当前这一组题的全部题目 id（含没作答的）：提交时一起送，练习日志才能显示完整卷子
+let PAPER_QIDS = [];
+// 考点从哪来：'parse'（学习记录定位）还是 'weak'（薄弱点）。
+// 只影响 ② 那页的提示文案与"依据"怎么显示，不影响组卷逻辑。
+let PLAN_SOURCE = 'parse';
 
 const $ = id => document.getElementById(id);
 const esc = s => (s === null || s === undefined ? '' : String(s))
@@ -172,13 +194,16 @@ const esc = s => (s === null || s === undefined ? '' : String(s))
 // 不在页面上另写一份：写两份迟早会和真正喂给 AI 的提示词对不上，那时页面上的说明就是假的。
 const GEN_KEY = 'qa_gen_settings';
 let GEN_OPTS = null;
-let GEN = { difficulty: 3, thinking: true };
+// group = 题量档位（light/standard/strong）。档位含义由后端 GROUPS 解释，
+// 页面只存"选了哪个"，不存题数 —— 存题数就等于在页面上复制了一份口径。
+let GEN = { difficulty: 3, thinking: true, group: null };
 
 function loadGenSettings() {
   try {
     const s = JSON.parse(localStorage.getItem(GEN_KEY) || 'null');
     if (s && typeof s === 'object') {
-      GEN = { difficulty: parseInt(s.difficulty) || 3, thinking: s.thinking !== false };
+      GEN = { difficulty: parseInt(s.difficulty) || 3, thinking: s.thinking !== false,
+              group: s.group || null };
     }
   } catch (e) { /* 坏数据就用默认 */ }
 }
@@ -188,10 +213,33 @@ function saveGenSettings() {
 // 模拟考试页（/）读的是同一个 localStorage 键，所以那里的 AI 补题也跟着这个设置走
 function thinkLabel() { return GEN.thinking ? '思考开' : '思考关'; }
 
+/** 当前档位的说明（题数/耗时），档位表来自后端。 */
+function groupInfo() {
+  const gs = (GEN_OPTS && GEN_OPTS.groups) || [];
+  const key = GEN.group || (GEN_OPTS && GEN_OPTS.default_group) || 'standard';
+  return gs.find(g => g.key === key) || gs[1] || null;
+}
+function groupLabel() {
+  const g = groupInfo();
+  return g ? `${g.name}（${g.single} 客观 + ${g.subjective} 主观 · ${g.minutes}）` : '——';
+}
+
 function renderGenSettings() {
   const levels = (GEN_OPTS && GEN_OPTS.levels) || {};
   const lv = levels[String(GEN.difficulty)] || {};
+  const gs = (GEN_OPTS && GEN_OPTS.groups) || [];
+  const cur = (groupInfo() || {}).key;
   const html = `
+    <div class="gs-title">题量档位</div>
+    <div class="group-steps">
+      ${gs.map(g => `
+        <button type="button" class="group-btn ${g.key === cur ? 'on' : ''}" data-group="${g.key}">
+          <b>${esc(g.name)}</b>
+          <span>${g.single} 客观 + ${g.subjective} 主观</span>
+          <span class="kp">${esc(g.minutes || '')}</span>
+        </button>`).join('')}
+    </div>
+    <div class="gs-title">难度档位<span class="kp">（决定 AI 补题/原创题的难度）</span></div>
     <div class="diff-steps">
       ${[1, 2, 3, 4, 5].map(n => {
         const L = levels[String(n)] || {};
@@ -213,11 +261,16 @@ function renderGenSettings() {
     </label>
     <div class="muted" style="font-size:12.5px">
       ${GEN.thinking
-        ? '开：题目质量更高，但一套约 <b>0.08–0.15 元</b>、<b>3–8 分钟</b>（出题请求的 token 上限与超时会自动放宽）。'
-        : '关：快而便宜（约 <b>0.04 元</b>、<b>1–3 分钟</b>），题目质量略低。随时可以再打开。'}
+        ? '开：题目质量更高，但<b>慢且贵</b>（约 3–8 分钟；推理 token 也算输出，是主要成本）。'
+        : '关：快而便宜（<b>1–3 分钟</b>），题目质量略低。随时可以再打开。'}
       　程序层仍会校验难度是否贴住你选的档位，不达标就带着问题重出。
     </div>`;
   document.querySelectorAll('.genset-body').forEach(el => { el.innerHTML = html; });
+  document.querySelectorAll('.group-btn').forEach(b => b.addEventListener('click', () => {
+    GEN.group = b.dataset.group;
+    saveGenSettings();
+    renderGenSettings();
+  }));
   document.querySelectorAll('.diff-btn').forEach(b => b.addEventListener('click', () => {
     GEN.difficulty = parseInt(b.dataset.diff) || 3;
     saveGenSettings();
@@ -229,9 +282,21 @@ function renderGenSettings() {
     renderGenSettings();
   }));
   const brief = $('genSetBrief');
-  if (brief) brief.textContent = `（难度 ${GEN.difficulty} · ${thinkLabel()}）`;
-  const btn = $('btnAiSet');
-  if (btn) btn.title = `难度档 ${GEN.difficulty} · ${thinkLabel()} · 全部 AI 原创、不含真题`;
+  if (brief) brief.textContent = `（${groupLabel()} · 难度 ${GEN.difficulty} · ${thinkLabel()}）`;
+  const est = $('genEstimate');
+  if (est) {
+    const g = groupInfo();
+    // **点击前**就把两种组卷方式的题量分开写清（设计 §4）：以前这里只有一句
+    // "单选 N + 主观 M"，把"真题优先的目标"与"全 AI 原创的固定值"混成一个标签 ——
+    // 用户点了才知道会出几道题，而这一步是要花钱的。文案来自后端 gen-options（单一来源）。
+    est.innerHTML = g
+      ? `<b>本次题量（点击组卷前请确认）</b>`
+        + `<div>· 真题为主：${esc(g.label_real || `${g.single} 客观 + ${g.subjective} 主观`)}</div>`
+        + `<div>· 全 AI 原创：${esc(g.label_ai || '')}</div>`
+        + `<div class="kp">难度档 ${GEN.difficulty} · ${esc(thinkLabel())}。`
+        + `组卷完成后会告诉你**实际**出了几道、几道真题几道 AI、预计用时多久。</div>`
+      : '';
+  }
 }
 
 async function bootGenSettings() {
@@ -243,6 +308,7 @@ async function bootGenSettings() {
       if (!localStorage.getItem(GEN_KEY)) {
         GEN.difficulty = r.default_difficulty || 3;
         GEN.thinking = r.default_thinking !== false;
+        GEN.group = r.default_group || 'standard';
       }
     }
   } catch (e) { /* 取不到就只用本地值，不影响出题 */ }
@@ -266,51 +332,236 @@ async function post(path, body) {
 
 function showUsage(u, where) {
   if (!u) return;
-  const est = (u.prompt_tokens||0)/1e6*1 + (u.completion_tokens||0)/1e6*4;
-  $(where).textContent = `tokens ${u.prompt_tokens||0}/${u.completion_tokens||0} ≈ ${est.toFixed(4)} 元`;
+  // 用量文案收在共用组件里：**token 永远显示**，金额只在配置了价目时才有
+  // （以前这里把 ¥1/¥4 写死在页面里，官方调价后页面会继续报错数字）
+  $(where).textContent = QA.usageText(u);
 }
 
-// ---------- 全 AI 模拟组（刻意不用真题；论述题取材真实政策热点）
-async function doAiSet() {
+// ============================================================ 步骤 ① 定位
+//
+// 这一段**只负责定位**，不再直接出题：所有入口（学习记录 / 薄弱点）都走到
+// 「② 确认考点与组卷」。以前「薄弱点」「全 AI」各自绕过确认直接出卷，
+// 于是同一个页面有三套行为、考点也看不见 —— 改成串联两段就是为了收掉这个分叉。
+
+/** 解析学习记录 → 定位考点 → 进步骤 ②。 */
+async function doParse() {
   const text = $('log').value.trim();
-  if (!text) { $('msg1').textContent = '先在上面写今天学了什么（这决定本组题的主题）'; return; }
-  $('btnAiSet').disabled = true;
-  $('aiSetReport').innerHTML = '';
-  $('msg1').textContent = `生成中：先定位考点 → 出 20 单选 + 3 主观 → 质量自检`
-    + `（难度档 ${GEN.difficulty} · ${thinkLabel()}，约 ${GEN.thinking ? '3–8' : '1–3'} 分钟，请勿关页面）…`;
+  if (!text) { $('msg1').textContent = '请先写点什么'; return; }
+  $('btnParse').disabled = true;
+  $('msg1').textContent = 'AI 解析中…';
   try {
-    const r = await post('/api/daily/ai-set',
-      { user_text: text, difficulty: GEN.difficulty, thinking: GEN.thinking });
+    const r = await post('/api/daily/parse', { text });
+    if (!r.ok) { $('msg1').textContent = '失败: ' + r.error; return; }
+    enterPlan(r.matches || [], { source: 'parse', unmatched: r.unmatched || [] });
+    showUsage(r.usage, 'usage');
+    $('msg1').textContent = '';
+  } catch (e) {
+    $('msg1').textContent = '出错: ' + e;
+  } finally {
+    $('btnParse').disabled = false;
+  }
+}
+
+/** 按薄弱点定位考点 → 进步骤 ②（**不直接出卷**）。 */
+async function doWeakPoints() {
+  $('msg1').textContent = '正在挑最弱的考点…';
+  try {
+    const r = await post('/api/daily/weak-points', { top_n: 8 });
+    if (!r.ok) { $('msg1').textContent = r.error || '失败'; return; }
+    // 薄弱点也装成"定位结果"的样子，复用同一张确认页
+    const matches = (r.points || []).map(x => ({
+      id: x.id, name: x.name, path: x.path,
+      confidence: 1 - (x.rate ?? 0),          // 命中率越低越"该练" → 置信度越高
+      reason: `你的命中率 ${Math.round((x.rate ?? 0) * 100)}%（${x.hit}/${x.total}）`
+        + (x.origin === 'legacy_unknown'
+           ? '——⚠️ 这条只有旧记录（来源不明），不是你自己确认过的掌握率' : ''),
+      weak_rate: x.rate, weak_hit: x.hit, weak_total: x.total,
+      legacy: x.origin === 'legacy_unknown'
+    }));
+    const legacyNote = r.legacy_n
+      ? `确认过的样本只够挑出 ${r.confirmed_n} 个考点，另外 ${r.legacy_n} 个是从`
+        + `<b>旧记录（来源不明）</b>里补的，已逐条标注 —— 要不要练由你决定。`
+      : '';
+    if (!matches.length) { $('msg1').textContent = '没有挑出可练的考点。'; return; }
+    enterPlan(matches, { source: 'weak' });
+    // 注意顺序：enterPlan 之后才写提示，否则会被上面的 `msg1` 清空覆盖掉
+    $('msg1').innerHTML = legacyNote;
+  } catch (e) {
+    $('msg1').textContent = '出错: ' + e;
+  }
+}
+
+/** 统一进入「② 确认考点与组卷」。 */
+function enterPlan(matches, opt) {
+  opt = opt || {};
+  MATCHES = matches;
+  PLAN_SOURCE = opt.source || 'parse';
+  renderPlan(opt);
+  goStep(2);
+}
+
+/**
+ * 从复盘页的「去练这一组」进来：`/daily?points=12,34,56`。
+ *
+ * 只带 id 过来，名称/路径/命中率在这里补齐 —— 复盘页与确认页必须是同一份事实，
+ * 所以走 `/api/points` 取，不把名称塞进 URL（塞进去就成了第二份可能过期的数据）。
+ * **只是预选**：下面照旧是勾选框，用户可以取消、可以改，点了「组卷」才发出题请求。
+ */
+async function bootPoints(ids) {
+  try {
+    // **必须先加载出题设置**（档位表/难度档说明都来自 `/api/daily/gen-options`）。
+    // 踩过：这条入口原来直接 enterPlan，于是 `GEN_OPTS` 还是 null → 题量档位一个按钮都不渲染、
+    // 标题显示成"——"，用户在这个入口**选不了题量**（截图里一眼看出来）。
+    // 正常流程是先 bootGenSettings() 再进确认页，这条入口少的就是这一步。
+    await bootGenSettings();
+    const r = await (await fetch('/api/points?ids=' + encodeURIComponent(ids))).json();
+    if (!r.ok) { $('msg1').innerHTML = `<span class="bad">${esc(r.error || '考点读取失败')}</span>`; return; }
+    const matches = (r.points || []).map(p => ({
+      id: p.id, name: p.name, path: p.path,
+      reason: (p.rate !== null && p.rate !== undefined)
+        ? `复盘建议练它：命中 ${p.hit}/${p.total} 点（${Math.round(p.rate * 100)}%）`
+          + (p.origin === 'legacy_unknown' ? '，但这是来源不明的旧记录' : '')
+        : '复盘页挑出来的考点',
+      confidence: 1,
+    }));
+    if (!matches.length) {
+      $('msg1').innerHTML = `<span class="bad">复盘里给的考点在库里找不到了（${esc(ids)}）。</span>`;
+      return;
+    }
+    enterPlan(matches, { source: 'review' });
+    $('msg1').innerHTML = `<span class="ok">已按复盘建议预选 ${matches.length} 个考点 ——`
+      + `可以取消不相关的，确认后再点「组卷」（**这一步还不花钱**）。</span>`;
+  } catch (e) {
+    $('msg1').innerHTML = `<span class="bad">考点读取失败：${esc(String(e))}</span>`;
+  }
+}
+
+function renderPlan(opt) {
+  opt = opt || {};
+  const weak = PLAN_SOURCE === 'weak';
+  const review = PLAN_SOURCE === 'review';
+  $('weakBox').innerHTML = (weak || review) ? `
+    <div class="card" style="background:#fffbea;border-left:3px solid #ecc94b">
+      <b>${review ? '这组考点是复盘页按你的作答挑出来的' : '这些是系统按命中率挑出来的薄弱考点'}</b>
+      <div class="kp">${review
+        ? '只预选了考点，题量与组卷方式还没定 —— 下一步自己确认。'
+        : '只考虑样本量 ≥ 2 的考点（答过一两次不能定强弱）。'}
+        可以取消勾选不相关的${review ? '' : '，或干脆换成「来自学习记录」的那条路'}。</div>
+    </div>` : '';
+  $('matchHint').innerHTML = review
+    ? '下面是<b>复盘建议练的考点</b>（按命中率排序），确认后选组卷方式。'
+    : (weak
+      ? '下面是<b>薄弱考点</b>（命中率越低越靠前），确认后选组卷方式。'
+      : '下面是 AI 从你的记录里定位到的考点，<b>取消勾选不相关的</b>（它偶尔会多识别）。');
+  $('matches').innerHTML = MATCHES.map((m, i) => `
+    <label class="card" style="display:block;cursor:pointer">
+      <input type="checkbox" class="mk" data-i="${i}" checked>
+      <b>${esc(m.name)}</b>
+      ${m.weak_rate !== undefined
+        ? `<span class="tag ${m.weak_rate < 0.6 ? 'warn' : ''}">命中率 ${Math.round(m.weak_rate * 100)}%（${m.weak_hit}/${m.weak_total}）</span>`
+        : `<span class="tag">置信 ${(m.confidence ?? 0).toFixed(2)}</span>`}
+      <div class="kp">${esc(m.path || '')}</div>
+      <div class="kp">依据：${esc(m.reason || '')}</div>
+    </label>`).join('') || '<p class="muted">没有可用的考点，请返回改写记录。</p>';
+  const um = opt.unmatched || [];
+  $('unmatchedBox').innerHTML = um.length
+    ? `<p class="muted">未能定位的内容：${um.join('；')}</p>` : '';
+  document.querySelectorAll('.mk').forEach(c =>
+    c.addEventListener('change', updatePickedCount));
+  updatePickedCount();
+  renderGenSettings();
+}
+
+function setAllMarks(on) {
+  document.querySelectorAll('.mk').forEach(c => { c.checked = on; });
+  updatePickedCount();
+}
+
+function pickedIds() {
+  return [...document.querySelectorAll('.mk:checked')].map(c => MATCHES[+c.dataset.i].id);
+}
+
+function updatePickedCount() {
+  const n = pickedIds().length;
+  const el = $('pickedCount');
+  if (el) el.textContent = n ? `已勾选 ${n} 个考点` : '⚠ 一个都没勾，先勾上再组卷';
+  ['btnGenReal', 'btnGenAi'].forEach(id => {
+    const b = $(id);
+    if (b) b.disabled = n === 0;
+  });
+}
+
+// ============================================================ 步骤 ② → ③ 组卷
+/**
+ * 按确认后的考点 + 选定方式组卷。
+ * @param {string} mode 'real' = 真题为主 + AI 补缺；'ai' = 全 AI 原创（不用真题）
+ */
+async function doGenerate(mode) {
+  mode = mode || 'real';
+  const ids = pickedIds();
+  if (!ids.length) { $('msg2').textContent = '至少勾选一个考点'; return; }
+
+  // 全 AI 组拿学习记录当"主题来源"；薄弱点那条路没有记录也没关系（考点已定）
+  const text = $('log').value.trim();
+  const btns = ['btnGenReal', 'btnGenAi'].map($).filter(Boolean);
+  btns.forEach(b => { b.disabled = true; });
+  $('aiSetReport').innerHTML = '';
+  $('msg2').textContent = mode === 'ai'
+    ? `全 AI 原创组卷中（${groupLabel()}；难度 ${GEN.difficulty} · ${thinkLabel()}）`
+      + `… ${GEN.thinking ? '约 3–8 分钟' : '约 1–3 分钟'}，请勿关页面`
+    : `组卷中（真题为主，不足用 AI 补；${groupLabel()}；难度 ${GEN.difficulty} · ${thinkLabel()}）`
+      + `… ${GEN.thinking ? '开思考后可能要几分钟' : '约 30–60 秒'}`;
+  try {
+    const r = await post('/api/daily/generate', {
+      point_ids: ids, mode,
+      user_text: text || undefined,        // 全 AI 组用它定主题
+      group: GEN.group || undefined,
+      difficulty: GEN.difficulty, thinking: GEN.thinking
+    });
     if (!r.ok) {
-      // 把失败原因完整显示出来（含服务端回显的文本长度），方便你截图反馈
-      $('msg1').innerHTML = '';
-      $('aiSetReport').innerHTML = `
-        <div class="card" style="border-left:3px solid var(--bad);margin-top:12px">
-          <h4 style="color:var(--bad)">生成失败</h4>
-          <div>${(r.error || '未知错误')}</div>
-          ${r.received_text_len !== undefined
-            ? `<div class="kp">服务端收到的学习记录长度：${r.received_text_len} 字</div>` : ''}
-          ${r.matched_ids ? `<div class="kp">定位到的考点 id：${r.matched_ids.join(', ')}</div>` : ''}
-          ${r.hint ? `<div class="kp">${r.hint}</div>` : ''}
-        </div>`;
+      $('msg2').textContent = '';
+      renderGenError(r, mode);
       return;
     }
     PAPER = r.paper;
-    renderPaper(r);
+    renderPaper(r, mode);
     showUsage(r.usage, 'usage');
-    $('focusBox').innerHTML = `
-      <div class="card" style="background:#f3f7fb;border-left:3px solid var(--accent)">
-        <h4>本组主题（由你的学习记录定位）</h4>
-        ${(r.focus || []).map(f => `<div class="kp">${f.path}</div>`).join('')}
-      </div>`;
-    renderAiReport(r.report);
-    $('msg1').textContent = '';
+    if (mode === 'ai') renderAiReport(r.report);
+    $('msg2').textContent = '';
     goStep(3);
   } catch (e) {
-    $('msg1').textContent = '出错：' + e;
+    $('msg2').textContent = '出错: ' + e;
   } finally {
-    $('btnAiSet').disabled = false;
+    btns.forEach(b => { b.disabled = false; });
+    updatePickedCount();
   }
+}
+
+/** 组卷失败时的展示：**把服务端给的诊断信息全放出来**，方便截图反馈。 */
+function renderGenError(r, mode) {
+  const extra = [
+    r.received_text_len !== undefined ? `服务端收到的学习记录长度：${r.received_text_len} 字` : '',
+    r.matched_ids ? `定位到的考点 id：${r.matched_ids.join(', ')}` : '',
+    r.real_count !== undefined ? `真题抽到 ${r.real_count} 道` : '',
+    r.hint || ''
+  ].filter(Boolean).map(x => `<div class="kp">${esc(x)}</div>`).join('');
+  $('aiSetReport').innerHTML = `
+    <div class="card" style="border-left:3px solid var(--bad);margin-top:12px">
+      <h4 style="color:var(--bad)">${mode === 'ai' ? '全 AI 组卷失败' : '组卷失败'}</h4>
+      <div>${esc(r.error || '未知错误')}</div>${extra}
+      ${mode === 'ai'
+        ? `<div class="kp">提示：全 AI 组会用你的学习记录定主题，所以记录写得越具体越好；
+             也可以先在 ① 写记录并「解析并定位考点」，再回来勾选考点。</div>` : ''}
+    </div>`;
+}
+
+/** 「再练一组」：回到 ② 而不是重新解析 —— 考点和题量通常还要用（也允许改）。
+ *  未提交的作答会丢，所以先问一句。 */
+function backToPlan() {
+  if (PAPER && !confirm('回到「确认考点与组卷」会重新出一份卷子，\n当前这份未提交的作答会丢失。\n继续？')) return;
+  $('aiSetReport').innerHTML = '';
+  $('msg2').textContent = '';
+  goStep(2);
 }
 
 function renderAiReport(rep) {
@@ -366,87 +617,6 @@ function renderAiReport(rep) {
     </div>`;
 }
 
-// ---------- 按薄弱点出题（不需要输入学习记录）
-async function doWeakPaper() {
-  $('msg1').textContent = `按薄弱点组卷中…（真题优先，不足用 AI 补；难度档 ${GEN.difficulty} · ${thinkLabel()}）`;
-  try {
-    const r = await post('/api/daily/weak-paper',
-      { difficulty: GEN.difficulty, thinking: GEN.thinking });
-    if (!r.ok) { $('msg1').textContent = r.error || '失败'; return; }
-    PAPER = r.paper;
-    renderPaper(r);
-    showUsage(r.usage, 'usage');
-    const f = r.focus || [];
-    $('focusBox').innerHTML = f.length ? `
-      <div class="card" style="background:#fffbea;border-left:3px solid #ecc94b">
-        <h4>本次聚焦的薄弱考点（命中率最低的 ${f.length} 个）</h4>
-        ${f.map(x => `<div class="kp">${Math.round(x.rate*100)}%（${x.hit}/${x.total}） ${x.path}</div>`).join('')}
-      </div>` : '';
-    $('msg1').textContent = '';
-    goStep(3);
-  } catch (e) {
-    $('msg1').textContent = '出错: ' + e;
-  }
-}
-
-// ---------- 步骤 1
-async function doParse() {
-  const text = $('log').value.trim();
-  if (!text) { $('msg1').textContent = '请先写点什么'; return; }
-  $('btnParse').disabled = true;
-  $('msg1').textContent = 'AI 解析中…';
-  try {
-    const r = await post('/api/daily/parse', { text });
-    if (!r.ok) { $('msg1').textContent = '失败: ' + r.error; return; }
-    MATCHES = r.matches || [];
-    renderMatches(r);
-    showUsage(r.usage, 'usage');
-    $('msg1').textContent = '';
-    goStep(2);
-  } catch (e) {
-    $('msg1').textContent = '出错: ' + e;
-  } finally {
-    $('btnParse').disabled = false;
-  }
-}
-
-function renderMatches(r) {
-  $('matches').innerHTML = MATCHES.map((m, i) => `
-    <label class="card" style="display:block;cursor:pointer">
-      <input type="checkbox" class="mk" data-i="${i}" checked>
-      <b>${m.name}</b>
-      <span class="tag">置信 ${(m.confidence ?? 0).toFixed(2)}</span>
-      <div class="kp">${m.path || ''}</div>
-      <div class="kp">依据：${m.reason || ''}</div>
-    </label>`).join('') || '<p class="muted">没有识别到考点，请改写记录。</p>';
-  const um = r.unmatched || [];
-  $('unmatchedBox').innerHTML = um.length
-    ? `<p class="muted">未能定位的内容：${um.join('；')}</p>` : '';
-}
-
-// ---------- 步骤 2 → 3
-async function doGenerate() {
-  const ids = [...document.querySelectorAll('.mk:checked')].map(c => MATCHES[+c.dataset.i].id);
-  if (!ids.length) { $('msg2').textContent = '至少勾选一个考点'; return; }
-  $('btnGen').disabled = true;
-  $('msg2').textContent = `出题中（真题优先，不足用 AI 补；难度档 ${GEN.difficulty} · ${thinkLabel()}）`
-    + `… ${GEN.thinking ? '开思考后可能要几分钟' : '约 30-60 秒'}`;
-  try {
-    const r = await post('/api/daily/generate',
-      { point_ids: ids, difficulty: GEN.difficulty, thinking: GEN.thinking });
-    if (!r.ok) { $('msg2').textContent = '失败: ' + r.error; return; }
-    PAPER = r.paper;
-    renderPaper(r);
-    showUsage(r.usage, 'usage');
-    $('msg2').textContent = '';
-    goStep(3);
-  } catch (e) {
-    $('msg2').textContent = '出错: ' + e;
-  } finally {
-    $('btnGen').disabled = false;
-  }
-}
-
 function normSingle(q, srcTag) {
   const opts = typeof q.options === 'string' ? JSON.parse(q.options || '{}') : (q.options || {});
   // difficulty 是模型自评的（AI 生成题才有）；真题没有这一项，页面上就不显示难度标签
@@ -459,19 +629,36 @@ function normSubj(q, srcTag) {
   let extra = {};
   try { extra = JSON.parse(q.extra || '{}'); } catch (e) {}
   return { id:q.id, qtype:q.qtype, stem:q.stem, tag:srcTag,
-           full_score: extra.full_score || q.full_score || 15,
+           // 满分**不写默认 15**：缺了就是"满分待核"。以前这里 `|| 15`，
+           // 一道缺字段的 30 分论述题会在页面上显示成「x / 15 分」（系统编的数字）。
+           full_score: (q.full_score !== undefined && q.full_score !== null) ? q.full_score
+                       : (extra.full_score !== undefined ? extra.full_score : null),
            points:q.points || [], outline:q.outline_id,
+           // 小问结构、评分说明、逐点分值一起带上 —— 组件要靠它们分组与折算分数
+           sections: q.sections || extra.sections || [],
+           answer_note: q.answer_note || extra.answer_note || '',
+           answer_text: extra.answer_text || '',
+           score_stats: q.score_stats || {},
+           // 评分来源与所选分支（续练时由 /api/session/{id}/paper 回传，新卷子为 null）
+           point_source: q.point_source || null,
+           selected_option: q.selected_option || null,
            difficulty: q.difficulty !== undefined ? q.difficulty : extra.difficulty };
 }
 
 // 难度标签：只有 AI 生成题带自评难度，真题不显示（别把自评数字伪装成客观事实，
 // 所以标签写「AI 自评难度 n」而不是「难度 n」）
 function diffTag(q) {
-  const d = parseInt(q.difficulty);
+  let d = parseInt(q.difficulty);
+  if (!(d >= 1 && d <= 5)) {
+    // 续练那条路的题目只有 extra（服务端原样带回来的行），没有顶层 difficulty ——
+    // 不回退看 extra 的话，续练页面上的难度标签会静默消失
+    try { d = parseInt(JSON.parse(q.extra || '{}').difficulty); } catch (e) { d = NaN; }
+  }
   return (d >= 1 && d <= 5) ? `<span class="tag diff" title="模型自评难度，仅供参考">AI 自评难度 ${d}</span>` : '';
 }
 
 // 客观题答案 + 解析：默认隐藏，提交/点按钮后才显示（数据在 questions.extra.explain）
+// 主观题的采分点/参考答案/批改结果全部交给共用组件 QA（见 /static/qa-answer.js）
 function dailyExplain(q) {
   try { return (JSON.parse(q.extra || '{}').explain) || ''; } catch (e) { return ''; }
 }
@@ -484,23 +671,68 @@ function dailyAnswerHtml(q) {
     </details>`;
 }
 function toggleDailyAnswers() {
-  const all = [...document.querySelectorAll('#paper details.qans')];
-  const show = all.some(d => d.hidden);
-  all.forEach(d => { d.hidden = !show; d.open = show; });
+  // 客观题的解析（details.qans）与主观题的采分点（details.qa-gate）一起管：
+  // 以前这个按钮只管客观题，主观题的采分点**一进页面就摊开**，等于提示答案。
+  const show = QA.anyHidden(document);
+  if (show) QA.revealAll(document); else QA.hideAll(document);
   const btn = document.getElementById('btnDailyAnswers');
   if (btn) btn.textContent = show ? '收起答案解析' : '显示答案解析';
 }
 
-function renderPaper(r) {
+// 批改完成后，共用组件会派发 qa-graded 事件；这里只负责把结果收进 GRADES，
+// 提交时随作答一起入库（练习日志要能回看这次批改）。
+window.addEventListener('qa-graded', e => {
+  GRADES[e.detail.qid] = e.detail.result;
+  if (e.detail.usage) showUsage(e.detail.usage, 'usage');
+});
+
+function renderPaper(r, mode) {
+  resetSubmission();
   const real = r.paper.real, gen = r.paper.generated || {single:[],subjective:[]};
   const singles = [...(real.single||[]).map(q => normSingle(q,'真题')),
                    ...((gen.single)||[]).map(q => normSingle(q,'AI生成'))];
   const subs = [...(real.subjective||[]).map(q => normSubj(q,'真题')),
                 ...((gen.subjective)||[]).map(q => normSubj(q,'AI生成'))];
   SUBJECTIVE_IDS = subs.map(s => s.id);
+  // 这一组发的全部题（含没作答的）。练习日志要靠它显示"完整练习内容"——
+  // 只传作答过的题，日志里就只剩"我做过的题"（用户明确要求改成整份卷子）。
+  PAPER_QIDS = [...singles.map(q => q.id), ...subs.map(q => q.id)].filter(id => id);
 
+  // 组卷方式写在标题行里：真题为主 / 全 AI 原创是两条不同的练法，
+  // 事后回看（或截图）必须一眼看出这一组是哪条路来的，不能只靠"题目上有没有 AI 标签"。
+  const g = (r.group && r.group.name) ? `${r.group.name}档` : '';
+  const modeTxt = mode === 'ai' ? '全 AI 原创（不含真题）' : '真题为主 + AI 补缺';
   $('paperInfo').textContent =
-    `客观 ${singles.length} 道 ｜ 主观 ${subs.length} 道 ｜ 其中真题 ${r.real_count} 道，AI 生成 ${r.generated_count} 道`;
+    `${modeTxt} ｜ ${g} ｜ 客观 ${singles.length} 道，主观 ${subs.length} 道`
+    + ` ｜ 其中真题 ${r.real_count} 道、AI 生成 ${r.generated_count} 道`;
+
+  // 题量透明（设计 §4）：**实际**出的题量、真题/AI 构成、预计用时，以及"多出来的是为什么"。
+  // 以前这里只报总数，用户按"轻练 10＋2"的时间预期去安排，实际可能多一道论述题。
+  const comp = r.composition;
+  const compBox = $('paperComposition');
+  if (compBox) {
+    const sb = comp.single || {}, sj = comp.subjective || {};
+    const bt = sj.by_type || {};
+    const typeName2 = {analysis: '辨析', short: '简答', essay: '分析论述'};
+    const parts = [
+      `单选 ${sb.n} 道（真题 ${sb.real} + AI ${sb.ai}）`,
+      `主观 ${sj.n} 道（真题 ${sj.real} + AI ${sj.ai}`
+        + (Object.keys(bt).length ? `：` + Object.entries(bt).map(([k, v]) => `${typeName2[k] || k} ${v}`).join('、') : '')
+        + `）`,
+    ];
+    compBox.innerHTML = comp
+      ? `<div class="card" style="background:#f7fafc">
+           <b>这一组实际出了什么</b>
+           <div class="kp">${parts.join(' ｜ ')}</div>
+           <div class="kp">预计用时 <b>约 ${comp.estimated_minutes} 分钟</b>`
+             + `<span class="muted">（${esc(comp.estimate_basis || '')}）</span></div>`
+           + ((comp.extra_reasons || []).length
+              ? `<div class="kp warn">与目标的差异：` +
+                comp.extra_reasons.map(esc).join(' ') + `</div>`
+              : `<div class="kp">题量与目标一致。</div>`)
+         + `</div>`
+      : '';
+  }
 
   const typeName = {analysis:'辨析', short:'简答', essay:'分析论述'};
   $('paper').innerHTML = `
@@ -520,144 +752,64 @@ function renderPaper(r) {
         <div class="stem"><span class="no">${i+1}.</span>${q.stem}
           <span class="tag">${typeName[q.qtype]||q.qtype} · ${q.full_score}分</span>
           <span class="tag ${q.tag==='真题'?'real':'ai'}">${q.tag}</span>${diffTag(q)}</div>
-        <div class="row" style="margin:6px 0">
-          <button class="ghost mini" onclick="togglePts(${q.id}, this)">展开/收起采分点自评</button>
-          <button class="ghost mini" onclick="aiGrade(${q.id})">AI 批改（用下方文本）</button>
-          <button class="ghost mini" onclick="document.getElementById('file-${q.id}').click()">上传手写照片批改</button>
-          <input type="file" id="file-${q.id}" accept="image/*" hidden onchange="onPick(${q.id}, this)">
-        </div>
-        <div class="pts" id="pts-${q.id}" hidden>
-          <div class="muted" style="margin-bottom:6px">勾选你实际答到的采分点：</div>
-          ${(q.points||[]).map(p => `
-            <label class="pt"><input type="checkbox" data-q="${q.id}" value="${p.seq}">
-              <b>${p.seq}.</b> ${p.claim}
-              <span class="ev">｜${(p.evidence||'').slice(0,70)}</span></label>`).join('')}
-        </div>
-        <textarea id="ans-${q.id}" placeholder="（可选）把你的作答文本敲进来，或把照片交给 AI 批改。用 AI 批改时必须填这里。" style="min-height:70px;margin-top:8px"></textarea>
-        <div class="grade" id="grade-${q.id}" hidden></div>
-        ${dailySubjAnswerHtml(q)}
+        ${QA.render(q, {pick: true, gated: true, title: `${typeName[q.qtype]||q.qtype}题`})}
+        ${QA.renderWork(q)}
       </div>`).join('') || '<p class="muted">（本次没有主观题）</p>'}`;
-}
 
-// 主观题参考答案（同样默认隐藏）
-function dailySubjAnswerHtml(q) {
-  let txt = '';
-  try { txt = (JSON.parse(q.extra || '{}').answer_text) || ''; } catch (e) { txt = ''; }
-  if (!txt) return '';
-  return `<details class="qans" hidden>
-      <summary>参考答案（做完再对照）</summary>
-      <div class="explain">${txt.replace(/</g,'&lt;')}</div>
-    </details>`;
-}
-
-function togglePts(id, btn) {
-  const box = $('pts-' + id);
-  box.hidden = !box.hidden;
-  btn.textContent = box.hidden ? '展开/收起采分点自评' : '收起采分点';
-}
-
-// ---------- 手写照片：压缩后交多模态批改
-function compressImage(file, maxW = 1600, quality = 0.85) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const scale = Math.min(1, maxW / img.width);
-      const cv = document.createElement('canvas');
-      cv.width = Math.round(img.width * scale);
-      cv.height = Math.round(img.height * scale);
-      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
-      resolve(cv.toDataURL('image/jpeg', quality));
-    };
-    img.onerror = reject;
-    img.src = URL.createObjectURL(file);
-  });
-}
-
-async function onPick(qid, input) {
-  const f = input.files && input.files[0];
-  if (!f) return;
-  const box = $('grade-' + qid);
-  box.hidden = false;
-  box.textContent = '压缩图片…';
-  try {
-    const dataUrl = await compressImage(f);
-    box.textContent = `图片 ${Math.round(dataUrl.length/1024)} KB，AI 识别并批改中（约 15–30 秒）…`;
-    await aiGrade(qid, dataUrl);
-  } catch (e) {
-    box.textContent = '图片处理失败: ' + e;
-  } finally {
-    input.value = '';
-  }
-}
-
-// ---------- AI 批改单题（文本或图片）
-async function aiGrade(qid, imageData) {
-  const box = $('grade-' + qid);
-  const text = ($('ans-' + qid).value || '').trim();
-  if (!imageData && !text) {
-    box.hidden = false;
-    box.textContent = '请先把答案文本填入下面的框，或点「📷 上传手写照片批改」。';
-    return;
-  }
-  box.hidden = false;
-  box.textContent = imageData ? 'AI 识别并批改中（约 15–30 秒）…' : 'AI 批改中（思考模式，约 10–20 秒）…';
-  try {
-    const body = { question_id: qid };
-    if (imageData) body.image = imageData; else body.student_text = text;
-    const r = await post('/api/daily/grade', body);
-    if (!r.ok) { box.textContent = '失败: ' + r.error; return; }
-    const d = r.result;
-    GRADES[qid] = d;   // 留到提交时一起入库，练习日志才能回看这次批改
-    showUsage(r.usage, 'usage');
-    box.innerHTML = `
-      ${d.recognized ? `<details open><summary>我识别到的手写内容（如有误请指出）</summary>
-        <div class="card">${d.recognized}${d.recognize_note ? `<div class="kp">识别存疑：${d.recognize_note}</div>` : ''}</div></details>` : ''}
-      <div class="score">${d.score} / ${d.full_score}</div>
-      ${d.judgment ? `
-        <div class="judge ${d.judgment.matched ? 'ok' : 'bad'}">
-          <b>① 判断正误（3 分，独立维度）</b>：
-          你判「${d.judgment.student || '（未作判断）'}」／正确应为「${d.judgment.correct || '?'}」
-          → <b>${d.judgment.matched ? '判断正确' : '判断错误或未判断'}</b>
-          ${d.judgment.note ? `<div class="kp">${d.judgment.note}</div>` : ''}
-        </div>` : ''}
-      ${r.score_cap_note ? `<div class="judge bad"><b>已按官方规则封顶</b>：${r.score_cap_note}
-        <div class="kp">辨析题必须先给出明确判断；判断错或没判断，理由写得再好也不超过 3 分。</div></div>` : ''}
-      <p><b>一句话总评：</b>${d.one_line || ''}</p>
-      <p><b>命中采分点：</b>${(d.hit_seqs||[]).join('、') || '无'} ｜
-         <b>漏掉：</b>${(d.miss_seqs||[]).join('、') || '无'} ｜
-         <b>错因：</b>${d.cause || '—'}</p>
-      ${(d.extra_credit||[]).map(x => `<div class="extra">言之有理加分项：${x.text}（建议 ${x.suggest_score} 分）</div>`).join('')}
-      <details><summary>逐段批注</summary>
-        ${(d.per_paragraph||[]).map(p => `<div class="card"><div>${p.text}</div>
-           <div class="kp">${p.mark} ${p.comment||''}</div></div>`).join('')}
-      </details>
-      <details><summary>标准采分点</summary>
-        ${(d.standard_points||[]).map(p => `<div class="kp">${p.seq}. ${p.claim}（${p.score}分）</div>`).join('')}
-      </details>
-      <details><summary>优化版作答</summary><div>${d.optimized||''}</div></details>`;
-    (d.hit_seqs||[]).forEach(seq => {
-      const cb = document.querySelector(`#pts-${qid} input[value="${seq}"]`);
-      if (cb) cb.checked = true;
-    });
-    $('pts-' + qid).hidden = false;
-  } catch (e) {
-    box.textContent = '出错: ' + e;
-  }
+  // 采分点勾选与批改按钮都用事件委托（题目块会被整块重渲染，逐个绑定必然漏）
+  QA.bind(document);
 }
 
 // ---------- 提交
+/**
+ * 把保存结果渲染到步骤 ④。
+ * 抽出来是因为「正常练习」与「续练」两条路要显示同一份结果，只有中间那行说明不同。
+ */
+function afterSave(r, extraHtml) {
+  const s = r.saved;
+  $('result').innerHTML = `
+    <p class="score">客观题：${s.single_score} / ${s.single * 2} 分
+      <span class="muted" style="font-size:13px;font-weight:400">（答对 ${s.single_right}/${s.single}）</span></p>
+    <p class="muted">主观题 ${s.subjective} 题${
+      s.unconfirmed ? `（其中 <b>${s.unconfirmed} 题只收到 AI 建议、未采纳</b>，不计入掌握率）` : ''} ｜ 记录采分点命中 ${s.point_hits} 个 ｜ 日期 ${r.date}</p>
+    <p class="score">${QA.practiceScoreText(s)}</p>
+    ${extraHtml || ''}
+    <p class="muted">练习成绩优先采用通过对账的 AI 详细批改实得分，无需自评勾选。点「采用 AI 建议」或自己勾采分点，只影响采分点确认和掌握率；
+      只批改不采纳的，建议留在日志里可回看，但不进掌握率。</p>
+    <div class="row">
+      <button onclick="genReview()" id="btnReview">生成 AI 学习复盘</button>
+      <a class="linkbtn" href="/reports?session=${s.session_id}">查看本次题目与改进任务</a>
+      <span class="muted" id="msgReview">让 AI 基于本次作答 + 历史记录出一份报告</span>
+    </div>`;
+  SESSION_ID = s.session_id || null;
+  $('msg3').textContent = '';
+  goStep(4);
+  // 提交后统一放出答案：客观题解析 + 主观题采分点（QA.revealAll 两样都管）
+  QA.revealAll(document);
+}
+
 async function submitAll() {
+  if (RESUME) return submitResume();
+  if (SAVE_BUSY) return;
   const single = [];
   document.querySelectorAll('#paper input[type=radio]:checked').forEach(i => {
     single.push({ id: parseInt(i.name.slice(2)), answer: i.value });
   });
   const map = {};
-  document.querySelectorAll('#paper .pt input:checked').forEach(i => {
+  // 采分点勾选由共用组件渲染（.qa 块）
+  document.querySelectorAll('#paper .qa input[type=checkbox][data-q]:checked').forEach(i => {
     const q = parseInt(i.dataset.q);
     (map[q] = map[q] || []).push(parseInt(i.value));
   });
+  // 来源与所选分支由组件记在题目块的 data-model 里（勾选/采纳 AI 建议/0 点自评都会写）
+  const sources = QA.collectSources(document);
+  const options = QA.collectOptions(document);
+  // 人工确认（设计 §5/D）：只提交"我确认过"这个意图，盖章与对账重算在服务端做
+  const overrides = QA.collectOverrides(document);
+  // **0 点命中的自评也要入 map**：以前只按"有没有勾中/有没有原文/有没有批改"判断，
+  // 于是"我自评了：一个点都没答到"这种有效结论会被当成"没做这题"静默丢掉。
+  Object.keys(sources).forEach(k => { map[k] = map[k] || []; });
   // 作答原文与 AI 批改结果一起提交（练习日志要展开显示"我写了什么、批得怎么样"）。
-  // 没勾采分点但写了原文/批过的题也算"做过的题"，否则它在日志里不会出现。
   document.querySelectorAll('#paper textarea[id^="ans-"]').forEach(ta => {
     const q = parseInt(ta.id.slice(4));
     const v = (ta.value || '').trim();
@@ -672,35 +824,316 @@ async function submitAll() {
     hits: Array.isArray(v) ? v : [],
     answer_text: (v && v.answer_text) || null,
     grade: (v && v.grade) || null,
+    point_source: sources[id] || null,
+    selected_option: options[id] || null,
+    grade_override: overrides[id] === true,
   }));
 
+  const body = {
+    single, subjective, date: new Date().toISOString().slice(0,10),
+    mode: '日常练习',
+    question_ids: PAPER_QIDS,
+    note: `考点 ${MATCHES.filter((_,i)=>document.querySelector('.mk[data-i="'+i+'"]')?.checked).length} 个`
+  };
+  const fingerprint = JSON.stringify(body);
+  if (SAVE_LAST === fingerprint) { $('msg3').textContent = '这份作答已经保存。'; return; }
+  body.submission_id = submissionIdFor(fingerprint);
+  SAVE_BUSY = true;
   $('btnSubmit').disabled = true;
   $('msg3').textContent = '保存中…';
   try {
-    const r = await post('/api/save', {
-      single, subjective, date: new Date().toISOString().slice(0,10),
-      mode: '日常练习',
-      note: `考点 ${MATCHES.filter((_,i)=>document.querySelector('.mk[data-i="'+i+'"]')?.checked).length} 个`
-    });
-    if (!r.ok) { $('msg3').textContent = '失败'; return; }
-    const s = r.saved;
-    $('result').innerHTML = `
-      <p class="score">客观题：${s.single_score} / ${s.single * 2} 分
-        <span class="muted" style="font-size:13px;font-weight:400">（答对 ${s.single_right}/${s.single}）</span></p>
-      <p class="muted">主观自评 ${s.subjective} 题 ｜ 记录采分点命中 ${s.point_hits} 个 ｜ 日期 ${r.date}</p>
-      <p class="muted">主观题若已用 AI 批改，结果不入命中率统计（避免 AI 情绪分污染薄弱点）。</p>
-      <div class="row">
-        <button onclick="genReview()" id="btnReview">生成 AI 学习复盘</button>
-        <span class="muted" id="msgReview">让 AI 基于本次作答 + 历史记录出一份报告</span>
-      </div>`;
-    SESSION_ID = s.session_id || null;
-    $('msg3').textContent = '';
-    goStep(4);
-    // 提交后自动放出客观题解析与主观题参考答案
-    document.querySelectorAll('#paper details.qans').forEach(d => { d.hidden = false; });
+    const r = await post('/api/save', body);
+    if (!r.ok) { $('msg3').textContent = '保存失败：' + (r.error || '未知错误'); return; }
+    afterSave(r, '');
+    SAVE_LAST = fingerprint;
   } catch (e) {
     $('msg3').textContent = '出错: ' + e;
   } finally {
+    SAVE_BUSY = false;
+    $('btnSubmit').disabled = false;
+  }
+}
+
+// ============================================================ 续练
+//
+// 从「练习日志」每条记录的「继续练习」进来：`/daily?continue=<session_id>`。
+// 载入的是**那一次的整份原卷**（你选的方案 B）：已作答的题带上次的作答、可改；
+// 没作答的题就是这次要补做的。答案一律仍折在折叠门里（与正常答题页同一条规矩）。
+//
+// 提交只记「新做的 + 改动过的」：已作答且一字未改的题不重复计分 —— 否则续练一次，
+// 同一道题会在正确率/薄弱点里被算两遍（历史数据就不可比了）。
+
+let RESUME = null;        // /api/session/{sid}/paper 的原样返回
+let RESUME_BASE = {};     // 上次的作答（判断"改过没有"用）
+const REVIEW_GRADING = new Set();
+function reviewDraftKey() { return `kaoyan-review-answer-${REVIEW_SID}-${REVIEW_ATTEMPT}`; }
+function invalidateReviewAnswer(qid) {
+  const box = document.querySelector(`.qa[data-qid="${qid}"]`);
+  if (!box) return;
+  const model = JSON.parse(box.dataset.model);
+  delete GRADES[qid];
+  if (window.__QA_GRADES) delete window.__QA_GRADES[qid];
+  model.grade = null; model.grade_override = false; model.point_source = 'unassessed';
+  model.points = model.points.map(p => ({...p, hit:false}));
+  box.outerHTML = QA.render(model, {pick:true, gated:true, title:QA.QTYPE_CN[model.qtype] || '主观题'});
+  const message = document.querySelector(`[data-msg="${qid}"]`);
+  if (message) message.textContent = '作答已修改，请重新批改或核对采分点。';
+}
+function persistReviewAnswer() {
+  if (!RESUME?.review_task) return;
+  const q = (RESUME.subjectives || [])[0], single = (RESUME.singles || [])[0];
+  const draft = {text:q ? ($('ans-' + q.id)?.value || '') : null,
+    choice:single ? document.querySelector(`input[name="sq${single.id}"]:checked`)?.value || null : null};
+  try { localStorage.setItem(reviewDraftKey(), JSON.stringify(draft)); }
+  catch (e) { $('msg3').textContent = '本机草稿无法保存，请及时保存本次订正。'; }
+}
+document.addEventListener('input', event => {
+  if (!RESUME?.review_task || !event.target.matches('textarea[id^="ans-"]')) return;
+  invalidateReviewAnswer(Number(event.target.id.slice(4)));
+  persistReviewAnswer();
+});
+document.addEventListener('change', event => {
+  if (RESUME?.review_task && event.target.matches('input[name^="sq"]')) persistReviewAnswer();
+});
+window.addEventListener('qa-grade-started', event => {
+  if (!RESUME?.review_task) return;
+  REVIEW_GRADING.add(event.detail.qid);
+  const textarea = $('ans-' + event.detail.qid);
+  if (textarea) textarea.readOnly = true;
+  $('btnSubmit').disabled = true;
+});
+window.addEventListener('qa-grade-finished', event => {
+  if (!RESUME?.review_task) return;
+  REVIEW_GRADING.delete(event.detail.qid);
+  const textarea = $('ans-' + event.detail.qid);
+  if (textarea) textarea.readOnly = false;
+  $('btnSubmit').disabled = SAVE_BUSY || REVIEW_GRADING.size > 0;
+  persistReviewAnswer();
+});
+
+/** 上次这题自评命中折合多少分（没分值就退回说命中几个点）。 */
+function lastScoreTxt(q) {
+  const hit = (q.points || []).filter(p => p.hit);
+  if (!hit.length) return '（上次没勾采分点）';
+  const scored = hit.filter(p => p.score !== null && p.score !== undefined);
+  if (scored.length === hit.length) {
+    const got = Math.round(scored.reduce((a, p) => a + p.score, 0) * 100) / 100;
+    return `（上次命中 ${got} 分）`;
+  }
+  return `（上次勾了 ${hit.length} 个采分点）`;
+}
+
+function enterResumeFail(html) {
+  $('paperInfo').textContent = '';
+  $('paper').innerHTML = `<div class="card" style="border-left:3px solid var(--bad)">
+      ${html}
+      <div class="kp">回 <a href="/logs">练习日志</a> 看那一次练了什么，
+        或去 <a href="/daily">日常练习</a> 重新定位考点组卷。</div>
+    </div>`;
+  $('btnSubmit').disabled = true;
+  $('btnDailyAnswers').disabled = true;
+}
+
+async function bootResume(sid) {
+  goStep(3);
+  $('paperInfo').textContent = '续练载入中…';
+  $('paper').innerHTML = '<p class="muted">正在读取那一次的整份卷子…</p>';
+  let j;
+  try {
+    const path = REVIEW_SID ? '/api/review/session/' + encodeURIComponent(sid)
+      + '/practice/' + encodeURIComponent(REVIEW_ATTEMPT) + '?finding=' + encodeURIComponent(REVIEW_FINDING || '')
+      : '/api/session/' + encodeURIComponent(sid) + '/paper';
+    j = await (await fetch(path)).json();
+  } catch (e) {
+    enterResumeFail(`<b>读取失败</b><div class="kp">${esc(e)}</div>`);
+    return;
+  }
+  if (!j.ok) {
+    enterResumeFail(`<b>这一次没法续练</b><div class="kp">${esc(j.error || '未知原因')}</div>`);
+    return;
+  }
+  renderResumePaper(j);
+}
+
+function renderResumePaper(j) {
+  resetSubmission();
+  RESUME = j;
+  const s = j.session || {};
+  const singles = j.singles || [], subs = j.subjectives || [];
+  const c = j.counts || {};
+
+  // 上次的作答：提交时用它判断"改过没有"
+  RESUME_BASE = {};
+  singles.forEach(q => {
+    if (q.answered) RESUME_BASE[q.id] = {kind: 'single', answer: q.my_answer || ''};
+  });
+  subs.forEach(q => {
+    if (!q.answered) return;
+    RESUME_BASE[q.id] = {
+      kind: 'subj',
+      hits: (q.points || []).filter(p => p.hit).map(p => p.seq),
+      text: (q.my_answer || '').trim(),
+      // 来源与所选分支也进基线：只改这两样（例如把"仅 AI 建议"改成"采纳"）也算改动过
+      source: q.point_source || null,
+      option: q.selected_option || null
+    };
+  });
+
+  $('paperInfo').textContent =
+    `续练 ｜ 原记录 ${s.date || ''}（${s.mode || '未标注'}）｜ 整份卷子 ${c.total || 0} 道：`
+    + `已作答 ${c.answered || 0} 道（带上次的作答，可改）、没作答 ${c.unanswered || 0} 道（这次补做）`;
+  document.getElementById('btnSubmit').textContent = '提交续练并保存';
+  if (j.review_task) {
+    $('paperInfo').textContent = `复盘订正 ｜ ${s.date || ''} · 原作答 a${j.source_attempt_id} ｜ 本次 1 道`;
+    $('btnSubmit').textContent = '保存本次订正';
+  }
+
+  const typeName = {analysis:'辨析', short:'简答', essay:'分析论述'};
+  const srcTag = q => q.year ? `<span class="tag real">${q.year} 真题</span>`
+                             : `<span class="tag ai">AI生成</span>`;
+  const didTag = q => q.answered
+    ? `<span class="tag warn">上次已作答</span>`
+    : `<span class="tag">上次没作答</span>`;
+
+  $('paper').innerHTML = `
+    ${j.review_task ? `<div class="card" style="border-left:3px solid var(--accent)">
+      <b>本次改进任务</b><p>${esc(j.review_task.instruction)}</p>
+      <p class="kp">完成标准：${esc(j.review_task.criterion)}</p>
+      <p class="kp">带入的是这一条原始作答，改写后保存为新记录。订正不代表已通过后续复测。</p>
+      <a href="/reports?session=${s.id}">回到本次复盘</a></div>` : ''}
+    ${j.review_task ? '' : `
+    <div class="card" style="border-left:3px solid #ecc94b;background:#fffbea">
+      <b>这是 ${esc(s.date || '')} 那一次练习的续练</b>
+      <div class="kp">载入的是<b>那一次的整份卷子</b>：已作答的题带上次的作答（可以直接改），
+        没作答的题就是这次要补的。所有答案仍折在「写完这题再看」里，做完再展开。</div>
+      <div class="kp"><b>提交只记新做的与改动过的题</b>：上次做过且一字未改的题不重复计分
+        （否则同一道题会在正确率、薄弱点里被算两遍）。练习日志里会新建一条「续练」记录，
+        原来那次练习一个字段都不会动。</div>
+      ${c.missing ? `<div class="kp">⚠ 其中 ${c.missing} 道题已不在题库里（题库重建过），这次无法续练。</div>` : ''}
+      <div class="kp"><a href="/daily">不续练了，去正常组卷 →</a></div>
+    </div>`}
+
+    <h3 style="font-size:14px;margin:18px 0 10px">一、单项选择题</h3>
+    ${singles.map((q, i) => `
+      <div class="q">
+        <div class="stem"><span class="no">${i+1}.</span>${esc(q.stem)}
+          ${srcTag(q)}${didTag(q)}${diffTag(q)}</div>
+        ${Object.entries(q.options || {}).map(([k, v]) =>
+          `<label class="opt"><input type="radio" name="sq${q.id}" value="${esc(k)}"
+             ${q.my_answer === k ? 'checked' : ''}><b>${esc(k)}.</b> ${esc(v)}</label>`).join('')}
+        ${dailyAnswerHtml(q)}
+      </div>`).join('') || '<p class="muted">（这一次没有客观题）</p>'}
+
+    <h3 style="font-size:14px;margin:22px 0 10px">二、主观题（在纸上作答）</h3>
+    ${subs.map((q, i) => `
+      <div class="q" id="sub-${q.id}">
+        <div class="stem"><span class="no">${i+1}.</span>${esc(q.stem)}
+          <span class="tag">${typeName[q.qtype] || q.qtype} · ${q.full_score}分</span>
+          ${srcTag(q)}${didTag(q)}${diffTag(q)}
+          ${q.answered ? `<span class="tag">${lastScoreTxt(q)}</span>` : ''}</div>
+        ${QA.render({...q, answered: true},
+                    {pick: true, gated: true, title: `${typeName[q.qtype] || q.qtype}题`})}
+        ${QA.renderWork(q)}
+      </div>`).join('') || '<p class="muted">（这一次没有主观题）</p>'}`;
+
+  QA.bind(document);
+  if (j.review_task) {
+    try {
+      const draft = JSON.parse(localStorage.getItem(reviewDraftKey()) || 'null');
+      const sub = subs[0], single = singles[0];
+      if (draft && sub && typeof draft.text === 'string' && draft.text !== (sub.my_answer || '')) {
+        $('ans-' + sub.id).value = draft.text;
+        invalidateReviewAnswer(sub.id);
+        $('msg3').textContent = '已恢复本次订正草稿，请重新核对评分后保存。';
+      }
+      if (draft && single && typeof draft.choice === 'string') {
+        const input = [...document.querySelectorAll(`input[name="sq${single.id}"]`)].find(el => el.value === draft.choice);
+        if (input) input.checked = true;
+      }
+    } catch (e) { /* 坏草稿不阻止加载原始作答 */ }
+  }
+}
+
+async function submitResume() {
+  if (SAVE_BUSY || REVIEW_GRADING.size) return;
+  const single = [], subjective = [], qids = [];
+  let done = 0, redone = 0, unchanged = 0, blank = 0;
+
+  // 客观题：按卷面顺序逐题判断。没选的题不写空作答（"没做"就是没做）
+  (RESUME.singles || []).forEach(q => {
+    const el = document.querySelector(`#paper input[name="sq${q.id}"]:checked`);
+    const base = RESUME_BASE[q.id];
+    if (!el) { blank++; return; }
+    if (base && base.answer === el.value) { unchanged++; return; }
+    single.push({id: q.id, answer: el.value});
+    qids.push(q.id);
+    if (base) redone++; else done++;
+  });
+
+  // 主观题：勾选 / 作答原文 / AI 批改结果 /**结果来源**，任一样有内容才算"这次做了这题"
+  (RESUME.subjectives || []).forEach(q => {
+    const box = document.querySelector(`#paper .qa[data-qid="${q.id}"]`);
+    const base = RESUME_BASE[q.id];
+    const hits = box
+      ? [...box.querySelectorAll('input[type=checkbox][data-q]:checked')]
+          .map(i => parseInt(i.value)).filter(n => !isNaN(n))
+      : [];
+    const ta = document.getElementById('ans-' + q.id);
+    const text = ta ? (ta.value || '').trim() : '';
+    const grade = GRADES[q.id] || null;
+    const src = box ? QA.sourceOf(q.id) : null;
+    const opt = box ? QA.optionOf(q.id) : null;
+    // 人工确认（设计 §5/D）：勾了这个就必须提交，否则"我确认过"存不进去
+    const ovr = (box && QA.overrideOf(q.id)) === true;
+    // 来源变了（比如点了「0 点命中，完成自评」）也算改动过 —— 否则"自评结果"存不进去
+    const sameSrc = base && (base.source || null) === (src || null)
+                    && (base.option || null) === (opt || null);
+    if (!hits.length && !text && !grade && !src && !ovr) { blank++; return; }
+    const sameHits = base && base.hits.length === hits.length
+      && base.hits.every(s => hits.indexOf(s) >= 0);
+    const sameText = base && (base.text || '') === text;
+    if (base && sameHits && sameText && sameSrc && !grade && !ovr) { unchanged++; return; }
+    subjective.push({id: q.id, hits, answer_text: text || null, grade,
+                     point_source: src || null, selected_option: opt || null,
+                     grade_override: ovr});
+    qids.push(q.id);
+    if (base) redone++; else done++;
+  });
+
+  if (!single.length && !subjective.length) {
+    $('msg3').innerHTML = '<b>没有需要保存的内容</b>：已作答的题一字未改，'
+      + '没作答的题这次也没动。改一改答案或补做几道再提交。';
+    return;
+  }
+
+  const s0 = RESUME.session || {};
+  const body = {
+    single, subjective, date: new Date().toISOString().slice(0,10),
+    mode: RESUME.review_task ? '复盘订正' : '续练',
+    question_ids: qids,
+    note: RESUME.review_task
+      ? `订正自练习 #${s0.id} / 作答 a${RESUME.source_attempt_id}：${RESUME.review_task.instruction}`
+      : `续练自 ${s0.date || ''} 那次练习（原：${s0.mode || '未标注'}）`
+  };
+  if (RESUME.review_task) body.review_source = {session_id:s0.id, attempt_id:RESUME.source_attempt_id};
+  const fingerprint = JSON.stringify(body);
+  if (SAVE_LAST === fingerprint) { $('msg3').textContent = '这份续练已经保存。'; return; }
+  body.submission_id = submissionIdFor(fingerprint);
+  SAVE_BUSY = true;
+  $('btnSubmit').disabled = true;
+  $('msg3').textContent = '保存中…';
+  try {
+    const r = await post('/api/save', body);
+    if (!r.ok) { $('msg3').textContent = '保存失败：' + (r.error || '未知错误'); return; }
+    afterSave(r, `<p class="muted">这次续练只记了<b>${single.length + subjective.length} 道</b>
+        新做／改动过的题：补做 ${done} 道、改了 ${redone} 道；
+        跳过 ${unchanged} 道（上次做过且没改动，不重复计分）、${blank} 道这次仍没做。</p>`);
+    SAVE_LAST = fingerprint;
+    if (RESUME.review_task) { try { localStorage.removeItem(reviewDraftKey()); } catch (e) {} }
+  } catch (e) {
+    $('msg3').textContent = '出错: ' + e;
+  } finally {
+    SAVE_BUSY = false;
     $('btnSubmit').disabled = false;
   }
 }
@@ -728,25 +1161,52 @@ async function loadWeakness() {
   const r = await fetch('/api/weakness');
   const j = await r.json();
   const box = $('weak');
+  const s = j.summary || {};
+  const legacy = j.legacy_items || [];
+  // 旧记录（来源不明）**不能混进上面的掌握率**，但也不能悄悄消失 ——
+  // 页面上明说"另有 N 条旧记录单独统计"，并把它们折在下面单独一块。
+  const legacyHtml = legacy.length ? `
+    <details style="margin-top:10px">
+      <summary class="muted">另有 ${legacy.length} 个考点只有「来源不明」的旧记录
+        （AI 建议或者没记来源，无法确认是你自己判的）——单独统计，不进上面的掌握率</summary>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:6px">
+        <tr><th style="text-align:left">考点</th><th>命中/总</th><th>命中率</th></tr>
+        ${legacy.map(i => `<tr><td style="border-bottom:1px solid #eee;padding:4px 6px" title="${i.path}">${i.name}</td>
+          <td style="text-align:center">${i.hit_n}/${i.total_n}</td>
+          <td style="text-align:center">${(i.rate*100).toFixed(0)}%</td></tr>`).join('')}
+      </table>
+    </details>` : '';
   if (!j.items || !j.items.length) {
-    box.innerHTML = '<p class="muted">还没有数据——先做一组练习并提交。</p>';
+    box.innerHTML = '<p class="muted">还没有**你确认过的**作答数据——做一组练习、勾采分点或采纳 AI 建议，就会出现在这里。</p>'
+      + legacyHtml;
   } else {
-    const s = j.summary || {};
     box.innerHTML = `<h3 style="font-size:14px;margin:16px 0 8px">薄弱考点（命中率升序）</h3>
-      <p class="muted">共 ${s.nodes||0} 个考点有数据，命中率低于 60% 的 ${s.weak_nodes||0} 个</p>
+      <p class="muted">共 ${s.nodes||0} 个考点有数据，命中率低于 60% 的 ${s.weak_nodes||0} 个
+        （只统计客观题 + 你确认过来源的主观题）</p>
       <table style="width:100%;border-collapse:collapse;font-size:13px">
       <tr><th style="text-align:left">考点</th><th>命中/总</th><th>命中率</th></tr>
       ${j.items.map(i => `<tr><td style="border-bottom:1px solid #eee;padding:4px 6px" title="${i.path}">${i.name}</td>
         <td style="text-align:center">${i.hit_n}/${i.total_n}</td>
         <td style="text-align:center;${i.rate<0.6?'color:#c53030;font-weight:700':''}">${(i.rate*100).toFixed(0)}%</td></tr>`).join('')}
-      </table>`;
+      </table>${legacyHtml}`;
   }
   box.style.display = 'block';
   box.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-// 进页面就把「出题设置」渲染出来（档位说明要等接口返回，所以是异步的）
-bootGenSettings();
+// 入口有三个（按优先级）：
+//   `?continue=<session_id>`：练习日志 →「继续练习」，直接进步骤 ③ 答题；
+//   `?points=1,2,3`：复盘页 →「去练这一组」，**预选考点**进步骤 ②（用户仍可改，未点组卷前不花钱）；
+//   都没有：正常流程，先把「出题设置」渲染出来（档位说明要等接口返回，所以是异步的）。
+const _QS = new URLSearchParams(location.search);
+const REVIEW_SID = _QS.get('review');
+const REVIEW_ATTEMPT = _QS.get('attempt');
+const REVIEW_FINDING = _QS.get('finding');
+const CONTINUE_SID = _QS.get('continue') || REVIEW_SID;
+const POINTS_IDS = _QS.get('points');
+if (CONTINUE_SID) bootResume(CONTINUE_SID);
+else if (POINTS_IDS) bootPoints(POINTS_IDS);
+else bootGenSettings();
 </script>
 </body>
 </html>

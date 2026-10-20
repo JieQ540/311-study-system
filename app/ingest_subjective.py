@@ -197,8 +197,7 @@ def main():
         print(f"  入库主观题 {len(qs)} 道，采分点 {npts} 个")
         done_years.append(year)
 
-    cost = tot_in / 1e6 * 1 + tot_out / 1e6 * 4
-    print(f"\nAI 用量: {tot_in}/{tot_out} tokens ≈ {cost:.4f} 元")
+    print(f"\nAI 用量: {ai.usage_line(tot_in, tot_out)}")
     n, y = con.execute(
         "SELECT COUNT(*), COUNT(DISTINCT year) FROM questions WHERE source LIKE '%真题·主观'"
     ).fetchone()

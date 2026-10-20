@@ -1,0 +1,44 @@
+{
+  "_说明": [
+    "随包的模型编目：**离线兜底**用。正常运行时 provider 会去问服务端的 GET /models",
+    "（那里有 context_window / max_output_tokens / input_modalities / effort 档位），",
+    "结果缓存到 source/catalog_cache.json；只有在没配密钥或网络不通时才读这个文件。",
+    "本文件的数字是 2026-10-08 用 GET https://api.deepseek.com/models 实测抄下来的，",
+    "官方文档 https://api-docs.deepseek.com/zh-cn/quick_start/pricing/ 亦核对过。",
+    "若与页面上标注的 source=live 结果不一致，以 live 为准，并重新跑一次",
+    "「刷新模型目录」把缓存更新 —— 这个文件只在换机器/断网时才需要手动更新。"
+  ],
+  "provider": "deepseek",
+  "verified_at": "2026-10-08",
+  "verified_by": "GET /models（实测）",
+  "models": [
+    {
+      "id": "deepseek-flash",
+      "name": "DeepSeek-V4.1-Flash",
+      "type": "chat",
+      "provider": "deepseek",
+      "context_window": 1048576,
+      "max_output_tokens": 393216,
+      "input": ["text", "image"],
+      "vision": true,
+      "reasoning": true,
+      "reasoning_levels": ["low", "high", "max"],
+      "reasoning_default": "high",
+      "_备注": "支持图像理解，手写照片批改靠它；旧名 deepseek-v4-flash / deepseek-v4-flash-vision-exp 仍可调用但已下线，按本模型计费。"
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek-V4-Pro",
+      "type": "chat",
+      "provider": "deepseek",
+      "context_window": 1048576,
+      "max_output_tokens": 393216,
+      "input": ["text"],
+      "vision": false,
+      "reasoning": true,
+      "reasoning_levels": ["low", "high", "max"],
+      "reasoning_default": "high",
+      "_备注": "**不支持图像理解**：切到它以后手写照片批改会失败（官方表格里「图像理解=不支持」）。"
+    }
+  ]
+}

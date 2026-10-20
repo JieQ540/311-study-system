@@ -202,8 +202,7 @@ def main():
         added.append((t, qid, len(pts)))
         print(f"  ✅ {t['year']} 第{t['number']}题 → question id={qid}，采分点 {len(pts)} 个")
 
-    cost = tot_in / 1e6 * 1 + tot_out / 1e6 * 4
-    print(f"\nAI 用量 {tot_in}/{tot_out} tokens ≈ {cost:.4f} 元")
+    print(f"\nAI 用量 {ai.usage_line(tot_in, tot_out)}")
     print(f"补入 {len(added)} 道题")
 
     # 校验：每年主观题是否齐了（辨析3/简答5/论述3）

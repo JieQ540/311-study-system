@@ -5,41 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>311 学习复盘</title>
 <style>
-  :root { --line:#e3e3e3; --ink:#222; --muted:#777; --accent:#2b6cb0; --ok:#2f855a; --bad:#c53030; --bg:#fafafa; }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
-         color:var(--ink); background:var(--bg); line-height:1.75; }
-  header { position:sticky; top:0; z-index:9; background:#fff; border-bottom:1px solid var(--line);
-           padding:10px 18px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
-  header h1 { font-size:16px; margin:0; font-weight:600; }
-  header a { color:var(--accent); text-decoration:none; font-size:13px; }
-  main { max-width:900px; margin:0 auto; padding:18px; }
-  .sum { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 18px; margin-bottom:16px; }
-  .sum .kpi { display:flex; gap:26px; flex-wrap:wrap; margin-top:6px; }
-  .sum .kpi div { font-size:13px; color:var(--muted); }
-  .sum .kpi b { display:block; font-size:21px; color:var(--ink); }
   .note { background:#fffbea; border-left:3px solid #ecc94b; padding:10px 14px; border-radius:6px;
           font-size:13px; margin-bottom:16px; }
-  .item { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 18px; margin-bottom:12px; }
-  .item h3 { margin:0 0 6px; font-size:15px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+
   .tags { font-size:13px; color:var(--muted); margin-bottom:8px; }
-  .tag { display:inline-block; font-size:12px; padding:1px 8px; border-radius:10px;
-         background:#eef3f8; color:var(--accent); margin-right:6px; }
+
   .tag.sim { background:#fdf3e7; color:#b7791f; }
   .tag.pending { background:#fdecec; color:var(--bad); }
   .tag.done { background:#e8f5ec; color:var(--ok); }
-  .score { font-size:17px; font-weight:700; color:var(--accent); }
-  button { font-size:14px; padding:7px 16px; border-radius:6px; border:1px solid var(--accent);
-           background:var(--accent); color:#fff; cursor:pointer; }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  button.ghost { background:#fff; color:var(--accent); }
-  button.danger { background:#fff; border-color:#e6b8b8; color:var(--bad); }
-  button.mini { font-size:12px; padding:4px 10px; }
+
   /* 跳去练习日志看「这次到底做了哪些题」——与日志板块双向联动的入口 */
-  a.linkbtn { font-size:12px; padding:4px 10px; border-radius:6px; border:1px solid var(--accent);
-              background:#fff; color:var(--accent); text-decoration:none; display:inline-block; }
-  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:10px; }
-  .muted { color:var(--muted); font-size:13px; }
+
   /* 趋势图：纯 CSS 柱状图，不引图表库 */
   .chart { display:flex; align-items:flex-end; gap:8px; height:150px; padding:10px 4px 0;
            border-bottom:1px solid var(--line); overflow-x:auto; }
@@ -56,30 +32,42 @@
   .report ul { margin:6px 0 6px 20px; padding:0; }
   .report li { margin:3px 0; }
   .report strong { color:#1a365d; }
-  table { width:100%; border-collapse:collapse; font-size:13px; margin-top:6px; }
-  td, th { border-bottom:1px solid #f0f0f0; padding:3px 6px; text-align:left; }
+
   .rate-bad { color:var(--bad); font-weight:700; }
-  details summary { cursor:pointer; font-size:13px; color:var(--accent); }
-  .empty { color:var(--muted); text-align:center; padding:40px; background:#fff;
-           border:1px solid var(--line); border-radius:8px; }
 </style>
+<link rel="stylesheet" href="/static/app-ui.css">
+<link rel="stylesheet" href="/static/review.css">
+<link rel="stylesheet" href="/static/retest.css">
+<script src="/static/app-shell.js" defer></script>
+<!-- 逐题原答、答案解析与详细批改与日志共用 qa-answer.js，复盘只编排内容。 -->
+<script src="/static/qa-answer.js"></script>
+<script src="/static/review.js"></script>
+<script src="/static/retest.js"></script>
 </head>
-<body>
-<header>
-  <h1>311 学习复盘</h1>
-  <a href="/">← 模拟考试</a>
-  <a href="/daily">← 日常练习</a>
-  <a href="/logs">练习日志</a>
-  <div style="flex:1"></div>
-  <span class="muted" id="meta"></span>
-</header>
+<body data-page="reports">
+<header class="app-header"><nav class="app-nav" data-app-nav aria-label="主要导航">311 备考系统</nav></header>
 <main>
+  <div class="page-hero">
+    <p class="eyebrow">学习复盘</p>
+    <div class="page-heading-row"><h1>从作答记录中，找到改进方向</h1></div>
+    <p class="intro">AI 整理本次问题与改进建议；回到原答核对依据，直接开始订正。</p>
+    <div class="page-meta" id="meta"></div>
+  </div>
+
   <div class="sum" id="sum"></div>
+  <section id="retestQueue" class="retest-queue" aria-label="间隔复测"></section>
+  <section id="reviewWorkspace" class="review-workspace" hidden aria-label="本次学习复盘"></section>
+  <details style="margin:20px 0"><summary>其他练习建议：当前总体薄弱考点</summary>
+    <p class="notice">这里根据全部已确认作答提供补充建议，本次的改进任务在上方。</p>
+    <div class="next-practice" data-rid="0"></div>
+  </details>
   <div id="chartBox"></div>
+  <h2 style="font-size:20px">练习与报告记录</h2>
   <div id="list"></div>
 </main>
 <script>
 const $ = id => document.getElementById(id);
+const GENERATING_REPORTS = new Set();
 
 // 极简 Markdown → HTML（只支持标题/加粗/列表/段落，够报告用；不引第三方库）
 function esc(s) {
@@ -118,7 +106,77 @@ function md(text) {
 
 function pct(v) { return (v === null || v === undefined) ? '—' : Math.round(v * 100) + '%'; }
 
+// 正文过期的**两种原因要分开说**（复审要求）：旧算法把分数算错过，
+// 与"后来依据变了（来源/命中点/历史变了）"是两件事，混成一句话会误导用户。
+function staleTip(kind) {
+  if (kind === 'legacy') {
+    return '这份报告的正文是按<b>旧口径</b>生成的（当时把主观题折合分算成了 0）。'
+      + '上面的数字已按现算结果更正；想让正文也跟上，点下面的「重新生成」。';
+  }
+  if (kind === 'basis_changed') {
+    return '这份报告的正文<b>依据已变化</b>（之后的评分来源、命中点或历史记录变了）。'
+      + '卡片数字是最新的，正文还是当时那份；点「重新生成」可以让它跟上。';
+  }
+  if (kind === 'unknown_basis') {
+    return '这份正文产生于本次改造之前，<b>无法核对其依据是否仍然成立</b>。'
+      + '建议点「重新生成」重写一份。';
+  }
+  return '';
+}
+
+// 主观题那一行：折合分 + **它的来源构成**。
+// 为什么必须写清来源：同一列数字里混着"学生自己确认的"和"旧记录里来源不明的"两种可信度，
+// 只给一个数字等于把两笔账并成一条"成绩线"（设计 §2.1/§2.2 都要求分开呈现）。
+const SRC_TXT = {
+  ai_graded: 'AI 详细批改实得分（优先）',
+  mixed_ai: 'AI 详细批改优先，其余按采分点折合',
+  confirmed: '均为你确认过的采分点',
+  legacy_unknown: '来源不明（旧记录，无法追溯是谁判的）',
+  mixed: '部分是旧记录（来源不明）',
+  unscored: '尚未评定'
+};
+function aiReferenceHtml(m) {
+  if (!m.ai_reference_n) return '';
+  const manual = m.ai_reference_manual_n || 0;
+  const auto = m.ai_reference_n - manual;
+  return `<span class="muted">· AI 详细批改实得分`
+    + `${m.ai_reference_score ?? 0}/${m.ai_reference_full ?? 0}（${m.ai_reference_n} 题`
+    + (manual ? `：机器对账通过 ${auto} 题、人工确认 ${manual} 题` : '，已对账')
+    + `）</span>`;
+}
+function subjHtml(it) {
+  const m = it.metrics || {};
+  const src = SRC_TXT[it.subjective_source] || '';
+  if (!it.subjective_full) {
+    // 没有折合分时，**原因要说准**：已自评但分值待核 ≠ 尚未评定（复审问题 3）。
+    // 措辞逻辑在共用组件里（QA.subjectiveStateText），四处共用一份。
+    return `｜ ${QA.subjectiveStateText({n: it.subjective_n || 0,
+      unscored_kinds: m.unscored_kinds})} ${aiReferenceHtml(m)}`;
+  }
+  const parts = [`｜ 主观题 <span class="score">${it.subjective_score ?? 0}</span> / ${it.subjective_full} 分`,
+                 `（折合得分率 ${pct((it.subjective_score || 0) / it.subjective_full)}）`];
+  if (it.subjective_source === 'mixed') {
+    parts.push(`<span class="muted">· 已确认 ${m.confirmed_point_score ?? 0}/${m.confirmed_point_full ?? 0}、`
+      + `旧来源不明 ${m.legacy_point_score ?? 0}/${m.legacy_point_full ?? 0}</span>`);
+  } else if (src) {
+    parts.push(`<span class="muted">· ${src}</span>`);
+  }
+  const miss = (it.subjective_n || 0) - (it.subjective_scored_n || 0);
+  if (miss > 0) {
+    parts.push(`<span class="muted">· 另有 ${miss} 道未评定或分值待核，未计入折合分</span>`);
+  }
+  if (m.ai_reference_n) {
+    // 「机器对账通过」与「人工确认」分开说（设计 §5/D）：可信参考分的成色要看得出，
+    // 不能把两者混成同一个数 —— 否则"可信"就变成了"我说了算"。
+    parts.push(aiReferenceHtml(m));
+  }
+  return parts.join(' ');
+}
+
 async function genReport(sid, btn) {
+  if (GENERATING_REPORTS.has(sid)) return;
+  GENERATING_REPORTS.add(sid);
+  const originalLabel = btn?.textContent;
   if (btn) { btn.disabled = true; btn.textContent = 'AI 分析中…（约 10-20 秒）'; }
   try {
     const r = await fetch('/api/review/generate', {
@@ -127,15 +185,16 @@ async function genReport(sid, btn) {
     });
     const j = await r.json();
     if (!j.ok) { alert('生成失败：' + (j.error || '未知错误')); if (btn) { btn.disabled = false; btn.textContent = '生成 AI 复盘'; } return; }
-    const u = j.usage || {};
-    const est = (u.prompt_tokens || 0) / 1e6 * 1 + (u.completion_tokens || 0) / 1e6 * 4;
-    $('meta').textContent = `本次报告 tokens ${u.prompt_tokens || 0}/${u.completion_tokens || 0} ≈ ${est.toFixed(4)} 元`;
-    await boot();
-    const box = $('rep-' + j.report_id);
-    if (box) box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const u = j.usage_info || j.usage || {};
+    $('meta').textContent = `本次报告 ${QA.usageText(u)}`;
+    await boot(sid);
+    $('reviewWorkspace').scrollIntoView({behavior:'smooth', block:'start'});
   } catch (e) {
     alert('出错：' + e);
     if (btn) { btn.disabled = false; btn.textContent = '生成 AI 复盘'; }
+  } finally {
+    GENERATING_REPORTS.delete(sid);
+    if (btn?.isConnected) { btn.disabled = false; btn.textContent = originalLabel; }
   }
 }
 
@@ -191,15 +250,21 @@ function renderItems(items) {
         ${it.report_id ? '<span class="tag done">已生成报告</span>'
                        : '<span class="tag pending">未生成报告</span>'}
       </h3>
+      <div class="row"><button class="mini" onclick="Review.open(${it.session_id}, true)">打开本次复盘</button></div>
       <div class="tags">
         客观题 <span class="score">${it.objective_score ?? 0}</span> / ${(it.objective_total || 0) * 2} 分
         （对 ${it.objective_right || 0}/${it.objective_total || 0}，${pct(oRate)}）
-        ｜ 主观自评 ${it.subjective_count || 0} 题
-        ｜ 采分点命中 ${it.point_hits || 0}/${it.point_total || 0}
+        ${subjHtml(it)}
+        ｜ 采分点命中 ${it.point_hits === null || it.point_hits === undefined
+            ? '<span class="muted">尚未评定</span>'
+            : `${it.point_hits || 0}/${it.point_total || 0}`}
         ${it.note ? '｜ ' + it.note : ''}
       </div>
+      ${it.content_stale ? `<div class="note">${staleTip(it.content_stale_kind)}</div>` : ''}
       ${it.report_id ? `
-        <div class="report" id="content-${it.report_id}">${md(it.content)}</div>
+        <details class="history-report"><summary>查看当时生成的 AI 报告</summary>
+          <div class="report" id="content-${it.report_id}">${Review.reportHtml(it.content, it.question_refs, it.session_id)}</div>
+        </details>
         <div class="row">
           <button class="ghost mini" onclick="genReport(${it.session_id}, this)">重新生成</button>
           <button class="danger mini" onclick="delReport(${it.report_id})">删除报告</button>
@@ -213,7 +278,12 @@ function renderItems(items) {
         </div>`}
       ${snap.length ? `
       <details style="margin-top:8px">
-        <summary>当时的薄弱点快照（前 ${snap.length} 个）</summary>
+        <summary>当时的薄弱点快照（前 ${snap.length} 个）${
+          it.weak_snapshot_legacy
+            ? '　<b>口径未知</b>（这份快照产生于记录来源之前的版本，分不清是自评还是 AI 建议）'
+            : (it.weak_snapshot_counts
+                ? `　来源：已确认 ${it.weak_snapshot_counts.confirmed || 0} 条作答 ／ 旧来源不明 ${it.weak_snapshot_counts.legacy || 0} 条`
+                : '')}</summary>
         <table>
           <tr><th>考点</th><th>命中/总</th><th>命中率</th></tr>
           ${snap.map(x => `<tr><td title="${x.path}">${x.name}</td>
@@ -225,12 +295,79 @@ function renderItems(items) {
   }).join('');
 }
 
-async function boot() {
+/**
+ * 「下一练」块（设计 §4）：最多 3 个**样本够**的考点 + 选取理由 + 一键去练。
+ *
+ * 三条硬规矩，都是为了不编造个性化结论：
+ *  ① 只认"已确认"的作答；已确认样本不足时**明说"数据不足"**，另列最多 3 个旧记录候选并标注来源不明；
+ *  ② 每个候选都带命中/总数与**为什么选它**（理由由服务端按数据推，页面不自己编）；
+ *  ③ 「去练这一组」只是跳到 /daily 的**考点确认步骤并预选** —— 用户可以取消勾选、
+ *     可以改题量与组卷方式，**点了「组卷」才真的出题花钱**。
+ *
+ * 为什么不把这块塞进 AI 正文：正文是模型写的散文，它可能建议一个你根本没有样本的考点；
+ * 这块是**现算的**，两个都显示、各自标明出处，用户才能判断该信哪个。
+ */
+let NEXT_PRACTICE = null;
+async function loadNextPractice() {
+  try {
+    const r = await (await fetch('/api/daily/weak-points', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ top_n: 3, min_total: 2 }) })).json();
+    NEXT_PRACTICE = r;
+  } catch (e) {
+    NEXT_PRACTICE = { ok: false, error: String(e) };
+  }
+  document.querySelectorAll('.next-practice').forEach(el => {
+    el.outerHTML = nextPracticeHtml({ report_id: el.dataset.rid });
+  });
+}
+
+function nextPracticeHtml(it) {
+  const r = NEXT_PRACTICE;
+  const box = `<div class="next-practice" data-rid="${it.report_id || ''}" style="margin-top:10px">`;
+  if (!r) return box + '<span class="muted">正在算下一练建议…</span></div>';
+  if (!r.ok) {
+    return box + `<div class="note">下一练建议暂时算不出来：${esc(r.error || '数据不足')}</div></div>`;
+  }
+  const conf = (r.points || []).filter(p => p.origin === 'confirmed');
+  const legacy = (r.points || []).filter(p => p.origin !== 'confirmed')
+    .filter(p => !(r.points || []).some(x => x.origin === 'confirmed' && x.id === p.id));
+  const rows = (list, tag) => list.map(p => `
+    <tr>
+      <td title="${esc(p.path || '')}">${esc(p.name)}</td>
+      <td>${p.hit}/${p.total}</td>
+      <td class="${p.rate < 0.6 ? 'rate-bad' : ''}">${pct(p.rate)}</td>
+      <td>${tag}</td>
+      <td class="muted" style="font-size:12px">${esc(p.reason || '')}</td>
+    </tr>`).join('');
+  const ids = (r.points || []).map(p => p.id).join(',');
+  return box + `
+    <div class="card" style="background:#f7fafc">
+      <b>总体薄弱考点：补充练习建议</b>
+      ${conf.length ? '' : `<div class="note"><b>数据不足</b>：还没有"已确认"的作答样本
+        （每个考点至少答过 ${r.min_total || 2} 次才算），下面的候选都来自来源不明的旧记录，
+        只能当线索，不构成个性化结论。</div>`}
+      <table style="margin-top:6px">
+        <tr><th>考点</th><th>命中/总</th><th>命中率</th><th>来源</th><th>为什么是它</th></tr>
+        ${rows(conf, '已确认')}
+        ${rows(legacy, '<b>旧记录·来源不明</b>')}
+      </table>
+      <div class="row" style="margin-top:8px">
+        ${ids ? `<a class="linkbtn mini" href="/daily?points=${encodeURIComponent(ids)}">去练这一组</a>
+                 <span class="muted">打开考点确认页并预选这几个 —— 还能取消勾选、改题量；
+                   点「组卷」之前不会调用 AI，也不花钱</span>`
+              : '<span class="muted">暂时没有可练的考点</span>'}
+      </div>
+    </div></div>`;
+}
+
+async function boot(selectedSid = null) {
   const r = await fetch('/api/reports?limit=200');
   const j = await r.json();
   const items = j.items || [], s = j.summary || {};
   if (!items.length) {
     $('sum').style.display = 'none';
+    $('reviewWorkspace').hidden = true;
     renderItems([]);
     return;
   }
@@ -246,9 +383,18 @@ async function boot() {
       <div>累计答对<b>${s.total_objective_right || 0}</b></div>
       <div>平均正确率<b>${pct(s.avg_objective_rate)}</b></div>
     </div>
-    ${s.pending ? `<div class="note" style="margin:10px 0 0">有 ${s.pending} 次练习还没生成报告——点下面的「生成 AI 复盘」即可。</div>` : ''}`;
+    ${s.pending ? `<div class="note" style="margin:10px 0 0">有 ${s.pending} 次练习还没生成报告——点下面的「生成 AI 复盘」即可。</div>` : ''}
+    ${s.stale_contents ? `<div class="note" style="margin:10px 0 0">有 ${s.stale_contents} 份报告的正文需要更新
+      （旧口径或依据已变化，卡片上逐份写明）。卡片上的数字都已按现算结果更正，正文可逐份「重新生成」。</div>` : ''}`;
   renderChart(j.trend || []);
   renderItems(items);
+  const querySid = Number(new URLSearchParams(location.search).get('session'));
+  const anchorItem = items.find(it => location.hash === '#rep-' + (it.report_id || 's' + it.session_id));
+  const active = selectedSid || Review.current() || querySid || anchorItem?.session_id || items[0].session_id;
+  await Review.open(active);
+  await Retests.loadQueue();
+  // 下一练建议是**现算**的（不吃 AI、不花钱），列表渲染完再补上
+  loadNextPractice();
 }
 boot();
 </script>

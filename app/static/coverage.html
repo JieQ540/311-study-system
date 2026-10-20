@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>全科覆盖与资料缺口 · 311 备考系统</title>
+<link rel="stylesheet" href="/static/app-ui.css"><link rel="stylesheet" href="/static/coverage.css">
+<script src="/static/app-shell.js" defer></script></head>
+<body data-page="coverage">
+<header class="app-header"><nav class="app-nav" data-app-nav aria-label="主要导航">311 备考系统</nav></header>
+<main>
+<div class="page-hero"><p class="eyebrow">五科覆盖 · 按需补缺</p><h1>知道题库有什么，下一步练什么</h1>
+<p class="intro">分别查看题目覆盖、参考资料和作答证据。未练过表示尚无证据，不直接记为薄弱；有题目也不表示已经掌握。</p>
+<p class="page-meta"><a href="/pilot">查看训练批次与第一批验证</a> · <a href="/practice">主观题专项</a></p></div>
+<p id="coverageStatus" class="notice" role="status" aria-live="polite">正在读取全科覆盖情况…</p>
+<section class="card" aria-labelledby="coverageSummaryTitle"><h2 id="coverageSummaryTitle">当前资料与记录</h2><div id="coverageSummary" class="coverage-summary"></div><div id="coverageNotes" class="coverage-notes"></div></section>
+<section class="card"><h2>按科目查看</h2><div id="coverageSubjects" class="coverage-subjects"></div></section>
+<section class="card"><h2>筛选范围</h2><div class="coverage-filters">
+<label for="coverageSubject">科目<select id="coverageSubject"><option value="">全部科目</option></select></label>
+<label for="coverageNode">章节或具体考点<select id="coverageNode"><option value="">全部大纲范围</option></select></label>
+<label for="coverageType">题型<select id="coverageType"><option value="">全部主观题</option><option value="analysis">辨析题</option><option value="short">简答题</option><option value="essay">分析论述题</option></select></label>
+<label for="coverageTask">设问任务<select id="coverageTask"><option value="">全部任务</option></select></label>
+<label for="coverageReference">参考资料<select id="coverageReference"><option value="">全部状态</option><option value="usable_qualitative">可作定性参考</option><option value="needs_source">待补可靠来源</option><option value="disputed">有争议，待核</option></select></label>
+<label for="coverageGap">题目缺口<select id="coverageGap"><option value="">全部候选</option><option value="mapping">映射待核</option><option value="any">有资料或质量缺口</option><option value="practice">可以开始自主练习</option></select></label>
+<label for="coverageSearch" class="coverage-search">搜索目录信息<input id="coverageSearch" type="search" maxlength="120" placeholder="科目、考点或题目目录名称"></label>
+</div><button id="coverageReset" class="ghost" type="button">清除筛选</button></section>
+<section class="card"><div class="coverage-heading"><h2>大纲条目与具体任务</h2><label for="coverageNodeState">查看<select id="coverageNodeState"><option value="">全部条目</option><option value="no_task">暂无具体任务关联</option><option value="no_reference">有任务，参考资料待补</option></select></label></div>
+<p class="muted">“具体任务关联”按实际设问映射；仅挂在上层的题目单列为待细分，不向下推定每个考点都有题。作答数量只说明记录存在。</p>
+<p id="coverageNodeCount" class="muted"></p><div class="table-scroll"><table class="coverage-node-table"><thead><tr><th scope="col">科目与大纲条目</th><th scope="col">具体任务关联题</th><th scope="col">上层候选待细分</th><th scope="col">可定性参考题</th><th scope="col">作答记录</th></tr></thead><tbody id="coverageNodes"></tbody></table></div>
+<div class="coverage-pages"><button type="button" id="coverageNodesPrevious" class="ghost">上一页条目</button><span id="coverageNodePage"></span><button type="button" id="coverageNodesNext" class="ghost">下一页条目</button></div></section>
+<section class="card"><h2>主观题目录与资料状态</h2><p class="muted">题源沿用库内原标记，不代表官方认证。目录不预先展开题干或参考。点击“预览题干”会记录已接触；保留终测题不在这里开放。参考卡须进入作答流程并锁定原答后查看。</p>
+<p id="coverageItemCount" class="muted"></p><div id="coverageItems" class="coverage-items"></div>
+<div class="coverage-pages"><button type="button" id="coveragePrevious" class="ghost">上一页题目</button><span id="coveragePage"></span><button type="button" id="coverageNext" class="ghost">下一页题目</button></div></section>
+<section id="coveragePreview" class="card coverage-preview" hidden aria-labelledby="coveragePreviewTitle"></section>
+<section class="card"><h2>训练批次</h2><div id="coverageBatches"></div><p class="muted">第一批继续按冻结名册验证训练方法。其他科目的资料补缺和自主练习可并行开展，批次题量按实际需要确定。</p></section>
+</main><script src="/static/coverage.js"></script></body></html>

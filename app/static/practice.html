@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>主观题专项 · 311 备考系统</title>
+  <style>
+    fieldset { padding:0; border:0; margin:0 0 22px; min-width:0; }
+    legend,.field > span { display:block; font-size:13px; font-weight:700; margin-bottom:9px; }
+    .types { display:flex; flex-wrap:wrap; gap:10px; }
+    .type { cursor:pointer; padding:10px 20px; border:1px solid var(--border); border-radius:8px;
+      background:#fff; display:flex; align-items:center; gap:8px; }
+    .type:has(input:checked) { color:var(--accent); border-color:var(--accent); background:#eff6ff; }
+    .type input { margin:0; }
+    .fields { display:grid; grid-template-columns:1fr 1.7fr .65fr; gap:16px; }
+    .fields select { width:100%; min-width:0; }
+    .row.actions { margin-top:24px; padding-top:20px; border-top:1px solid #edf0f5; }
+    .pool { margin-right:auto; }
+    #available { color:var(--accent); font-size:21px; margin:0 4px; }
+    .notice { margin:14px 0; color:#9a5b0b; background:#fffbeb; border-radius:7px; padding:10px 14px; }
+    .paper-head { margin:26px 0 16px; justify-content:space-between; }
+    .paper-head h2 { margin:0; }
+    .question-top { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:14px; }
+    .question-top b { margin-right:auto; }
+    .question .stem { white-space:pre-wrap; margin-bottom:20px; font-size:16px; line-height:1.9; }
+    .savebar { margin-top:18px; }
+    #saved { border-left:3px solid #16a34a; padding:12px 16px; background:#f0fdf4; margin-top:16px; }
+    @media(max-width:700px) { .fields { grid-template-columns:1fr; gap:12px; } .type { padding:9px 12px; } }
+  </style>
+  <link rel="stylesheet" href="/static/app-ui.css">
+  <script src="/static/app-shell.js" defer></script>
+</head>
+<body data-page="practice">
+<header class="app-header"><nav class="app-nav" data-app-nav aria-label="主要导航">311 备考系统</nav></header>
+<main>
+  <div class="page-hero">
+  <p class="eyebrow">主观题专项</p>
+  <h1>选一种题型，逐题练透</h1>
+  <p class="intro">练审题、知识选择和分析展开。先完成作答，再看逐点得分与具体修改建议。</p>
+  <p><a href="/pilot">主观题训练试点：按考点完成初测、订正与复测</a></p>
+  <p><a href="/coverage">全科覆盖：查看任务映射、资料缺口与自主练习</a></p>
+  </div>
+  <section class="card" aria-label="练习设置">
+    <fieldset><legend>这次练什么</legend><div class="types">
+      <label class="type"><input type="radio" name="qtype" value="analysis">辨析题</label>
+      <label class="type"><input type="radio" name="qtype" value="short">简答题</label>
+      <label class="type"><input type="radio" name="qtype" value="essay" checked>分析论述题</label>
+    </div></fieldset>
+    <div class="fields">
+      <label class="field"><span>科目（可选）</span><select id="board"><option value="">全部科目</option></select></label>
+      <label class="field"><span>章节（可选）</span><select id="chapter"><option value="">全部章节</option></select></label>
+      <label class="field"><span>本组题量</span><select id="count">
+        <option value="1">1 道</option><option value="2">2 道</option><option value="3">3 道</option><option value="5">5 道</option>
+      </select></label>
+    </div>
+    <div class="row actions">
+      <div class="pool muted">符合条件的真题 <strong id="available">—</strong> 道<br>只用现有真题；不足时显示实际数量。</div>
+      <button id="reset" class="ghost" type="button">重新开始本轮</button>
+      <button id="start" type="button" disabled>开始练习</button>
+    </div>
+    <p id="message" class="muted" role="status" aria-live="polite">正在读取题库…</p>
+  </section>
+  <div id="paperArea" hidden>
+    <div class="row paper-head"><h2 id="paperTitle">本组练习</h2>
+      <button class="ghost" id="toggleAnswers" type="button">显示答案解析</button></div>
+    <p id="paperNotice" class="notice" hidden></p>
+    <div id="paper"></div>
+    <div class="row savebar" id="savebar">
+      <button id="save" type="button">保存作答</button>
+      <span id="saveMessage" class="muted" role="status" aria-live="polite">作答与批改会一起保存在练习日志。</span>
+    </div>
+    <div id="saved" hidden role="status"></div>
+    <p class="muted">练习成绩优先采用通过对账的 AI 详细批改实得分，无需自评勾选。采分点确认单独记录；分数通过对账仅说明分数构成一致。</p>
+  </div>
+</main>
+<script src="/static/qa-answer.js"></script>
+<script src="/static/practice.js"></script>
+</body>
+</html>
